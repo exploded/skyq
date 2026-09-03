@@ -70,8 +70,16 @@ func serveDiscovery(ctx context.Context, conn net.PacketConn, apiPort int) {
 		if !strings.HasPrefix(strings.TrimSpace(string(buf[:n])), "alpacadiscovery1") {
 			continue
 		}
-		if u, ok := src.(*net.UDPAddr); !ok || !local.contains(u.IP) {
+		u, ok := src.(*net.UDPAddr)
+		if !ok || !local.contains(u.IP) {
 			continue // not from any of this machine's networks — off-LAN
+		}
+		// A probe from this machine's own LAN address is a local client
+		// (N.I.N.A.) probing via the LAN interface; its loopback-interface
+		// probe already gets an answer. Replying to both would list the
+		// device twice — clients key responders by address, not UniqueID.
+		if !u.IP.IsLoopback() && local.isSelf(u.IP) {
+			continue
 		}
 		if _, err := conn.WriteTo([]byte(reply), src); err != nil {
 			log.Printf("discovery reply to %s: %v", src, err)
@@ -87,6 +95,7 @@ func serveDiscovery(ctx context.Context, conn net.PacketConn, apiPort int) {
 type localNetworks struct {
 	mu      sync.Mutex
 	nets    []*net.IPNet
+	ips     []net.IP // this machine's own addresses
 	fetched time.Time
 }
 
@@ -109,25 +118,40 @@ func (l *localNetworks) contains(ip net.IP) bool {
 	return false
 }
 
+// isSelf reports whether ip is one of this machine's own (non-loopback)
+// interface addresses.
+func (l *localNetworks) isSelf(ip net.IP) bool {
+	l.current() // refresh the cache if stale
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, own := range l.ips {
+		if own.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *localNetworks) current() []*net.IPNet {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.fetched.IsZero() || time.Since(l.fetched) > 30*time.Second {
 		l.fetched = time.Now()
-		if nets := interfaceNetworks(); len(nets) > 0 {
-			l.nets = nets
+		if nets, ips := interfaceNetworks(); len(nets) > 0 {
+			l.nets, l.ips = nets, ips
 		}
 	}
 	return l.nets
 }
 
-func interfaceNetworks() []*net.IPNet {
+func interfaceNetworks() ([]*net.IPNet, []net.IP) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		log.Printf("discovery: enumerating interfaces: %v", err)
-		return nil
+		return nil, nil
 	}
 	var nets []*net.IPNet
+	var ips []net.IP
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -142,7 +166,8 @@ func interfaceNetworks() []*net.IPNet {
 				continue
 			}
 			nets = append(nets, &net.IPNet{IP: ipNet.IP.Mask(ipNet.Mask), Mask: ipNet.Mask})
+			ips = append(ips, ipNet.IP)
 		}
 	}
-	return nets
+	return nets, ips
 }

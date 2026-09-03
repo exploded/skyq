@@ -166,7 +166,7 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request) {
 		"windspeed", "winddirection", "windgust", "rainrate":
 		s.ambient(w, r, prop)
 
-	case "starfwhm":
+	case "starfwhm", "skytemperature":
 		s.reply(w, r, nil, errNotImplemented, "sensor not implemented: "+prop)
 
 	default:

@@ -84,6 +84,40 @@ func TestSharedBind(t *testing.T) {
 	reuseListen(t, "0.0.0.0:"+strconv.Itoa(port)) // Fatals if the bind fails
 }
 
+// A probe arriving from this machine's own LAN address is a local client
+// probing via the LAN interface; answering it as well as the loopback probe
+// lists every device twice in N.I.N.A. It must be dropped.
+func TestDiscoverySuppressesOwnLANAddress(t *testing.T) {
+	_, ips := interfaceNetworks()
+	var v4 net.IP
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			v4 = ip
+			break
+		}
+	}
+	if v4 == nil {
+		t.Skip("machine has no non-loopback IPv4 address")
+	}
+	conn := reuseListen(t, "0.0.0.0:0")
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go serveDiscovery(ctx, conn, 11112)
+
+	// Dialling our own LAN address makes the OS use it as the source too.
+	client, err := net.Dial("udp", net.JoinHostPort(v4.String(), strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	client.Write([]byte("alpacadiscovery1"))
+	client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if n, err := client.Read(make([]byte, 256)); err == nil {
+		t.Errorf("probe from own LAN address %s got a %d-byte reply — duplicate device listing", v4, n)
+	}
+}
+
 // Guard against the responder replying to off-LAN sources.
 func TestDiscoveryLocalOnly(t *testing.T) {
 	l := &localNetworks{fetched: time.Now()}
