@@ -17,6 +17,7 @@ import (
 
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/live"
+	"github.com/exploded/skyq/internal/owm"
 	"github.com/exploded/skyq/internal/report"
 )
 
@@ -31,6 +32,12 @@ var tmpl = template.Must(template.New("live").Parse(liveTmpl))
 type Server struct {
 	engine *live.Engine
 	loc    *time.Location
+
+	// Weather is the optional OpenWeatherMap pass-through; nil hides the
+	// ambient-conditions line.
+	Weather interface {
+		Current() (owm.Reading, error)
+	}
 }
 
 func New(engine *live.Engine, loc *time.Location) *Server {
@@ -102,6 +109,7 @@ type viewData struct {
 	Events     []eventRow
 	FrameCount int
 	Generated  string
+	Weather    string
 }
 
 func (s *Server) render(w http.ResponseWriter, name string) {
@@ -156,6 +164,15 @@ func (s *Server) render(w http.ResponseWriter, name string) {
 	if len(snap.Samples) >= 2 {
 		d.Chart = template.HTML(lumChart(snap.Samples))
 		d.HasChart = true
+	}
+	if s.Weather != nil {
+		if cur, err := s.Weather.Current(); err == nil {
+			d.Weather = fmt.Sprintf("%.1f °C · %.0f%% RH · dew %.1f °C · wind %.1f m/s",
+				cur.Temperature, cur.Humidity, cur.DewPoint, cur.WindSpeed)
+			if cur.RainRate > 0 {
+				d.Weather += fmt.Sprintf(" · rain %.1f mm/h", cur.RainRate)
+			}
+		}
 	}
 
 	var buf bytes.Buffer

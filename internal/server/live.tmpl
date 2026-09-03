@@ -64,6 +64,6 @@ cloud is not a safety condition, and unknown never means clear.</p>
 {{end}}  </div>
 </div>{{end}}
 
-<p class="updated">{{.FrameCount}} frames tonight &middot; updated {{.Generated}} &middot; refreshes every 30&#8202;s</p>
+<p class="updated">{{if .Weather}}{{.Weather}} &middot; {{end}}{{.FrameCount}} frames tonight &middot; updated {{.Generated}} &middot; refreshes every 30&#8202;s</p>
 </div>
 {{end}}

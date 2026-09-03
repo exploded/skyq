@@ -54,6 +54,13 @@ type Config struct {
 	PollSeconds    int     `json:"poll_seconds"`
 	MaxStillAgeMin int     `json:"max_still_age_minutes"`
 
+	// OpenWeatherMapAPIKey enables the ambient-conditions pass-through
+	// (temperature, humidity, pressure, dew point, wind, rain) on the
+	// Alpaca device, so N.I.N.A.'s FITS headers lose nothing when its
+	// weather source switches from OpenWeatherMap to skyq. Empty leaves
+	// those sensors not-implemented.
+	OpenWeatherMapAPIKey string `json:"openweathermap_api_key"`
+
 	Publish Publish `json:"publish"`
 }
 

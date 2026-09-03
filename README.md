@@ -61,6 +61,16 @@ tonight's N.I.N.A. log for a live transparency index, and exposes:
   Firewall prompt): current state, sparkline, latest still, tonight's
   events. Read-only; refreshes every 30 s.
 
+N.I.N.A. connects one weather device at a time, so switching it from
+OpenWeatherMap to skyq would normally drop temperature, humidity,
+pressure, dew point and wind from the FITS headers. Set
+`openweathermap_api_key` (the same key N.I.N.A. uses) and skyq passes
+those through: it polls OpenWeatherMap every 10 minutes and serves the
+ambient sensors alongside its own sky signals. OpenWeatherMap's cloud
+cover is deliberately ignored — the all-sky volatility is the cloud
+signal. With no key, the ambient sensors report not-implemented and
+N.I.N.A. greys them out.
+
 Task Scheduler: schedule `run-serve.bat` at startup with
 "restart the task if it fails" enabled, same user as N.I.N.A.
 Gating in sequences: use Sequencer Powerups weather expressions (e.g.

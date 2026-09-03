@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/exploded/skyq/internal/live"
+	"github.com/exploded/skyq/internal/owm"
 )
 
 // Alpaca error numbers (ASCOM spec).
@@ -40,11 +41,22 @@ const (
 	uniqueID   = "b1946ac9-2be6-4f4e-9d20-5e5b253dd7e0"
 )
 
+// WeatherSource supplies ambient conditions (OpenWeatherMap pass-through)
+// so N.I.N.A.'s FITS headers keep temperature, humidity, pressure, dew
+// point and wind when it switches its weather source to skyq.
+type WeatherSource interface {
+	Current() (owm.Reading, error)
+}
+
 // Server implements the Alpaca HTTP API over a live.Engine.
 type Server struct {
 	engine    *live.Engine
 	txn       atomic.Uint32
 	connected atomic.Bool
+
+	// Weather is optional; nil leaves the ambient sensors not-implemented
+	// (1024), exactly the pre-OWM behaviour.
+	Weather WeatherSource
 }
 
 func New(engine *live.Engine) *Server { return &Server{engine: engine} }
@@ -125,16 +137,35 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request) {
 			s.reply(w, r, snap.Index, 0, "")
 		}
 	case "timesincelastupdate":
-		if snap.LastStillAt.IsZero() {
-			s.reply(w, r, nil, errValueNotSet, "no stills received yet")
-		} else {
-			s.reply(w, r, time.Since(snap.LastStillAt).Seconds(), 0, "")
+		switch strings.ToLower(param(r, "SensorName")) {
+		case "temperature", "humidity", "pressure", "dewpoint",
+			"windspeed", "winddirection", "windgust", "rainrate":
+			if s.Weather == nil {
+				s.reply(w, r, nil, errNotImplemented, "sensor not implemented")
+				return
+			}
+			cur, err := s.Weather.Current()
+			if err != nil {
+				s.reply(w, r, nil, errValueNotSet, err.Error())
+				return
+			}
+			s.reply(w, r, time.Since(cur.At).Seconds(), 0, "")
+		default:
+			// No sensor name (device-wide) or an all-sky sensor: the stills.
+			if snap.LastStillAt.IsZero() {
+				s.reply(w, r, nil, errValueNotSet, "no stills received yet")
+			} else {
+				s.reply(w, r, time.Since(snap.LastStillAt).Seconds(), 0, "")
+			}
 		}
 	case "sensordescription":
 		s.reply(w, r, s.sensorDescription(param(r, "SensorName")), 0, "")
 
-	case "dewpoint", "humidity", "pressure", "rainrate",
-		"starfwhm", "temperature", "winddirection", "windgust", "windspeed":
+	case "temperature", "humidity", "pressure", "dewpoint",
+		"windspeed", "winddirection", "windgust", "rainrate":
+		s.ambient(w, r, prop)
+
+	case "starfwhm":
 		s.reply(w, r, nil, errNotImplemented, "sensor not implemented: "+prop)
 
 	default:
@@ -166,6 +197,42 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request, prop string) {
 	}
 }
 
+// ambient answers the OpenWeatherMap pass-through sensors: 1024 when no
+// weather source is configured (N.I.N.A. greys the field out), 1026 when
+// the source has no fresh reading (unavailable, per SPEC §8 — never a
+// stale number presented as current), else the value.
+func (s *Server) ambient(w http.ResponseWriter, r *http.Request, prop string) {
+	if s.Weather == nil {
+		s.reply(w, r, nil, errNotImplemented, "sensor not implemented: "+prop+" (no openweathermap_api_key configured)")
+		return
+	}
+	cur, err := s.Weather.Current()
+	if err != nil {
+		s.reply(w, r, nil, errValueNotSet, prop+" unavailable: "+err.Error())
+		return
+	}
+	var v float64
+	switch prop {
+	case "temperature":
+		v = cur.Temperature
+	case "humidity":
+		v = cur.Humidity
+	case "pressure":
+		v = cur.Pressure
+	case "dewpoint":
+		v = cur.DewPoint
+	case "windspeed":
+		v = cur.WindSpeed
+	case "winddirection":
+		v = cur.WindDir
+	case "windgust":
+		v = cur.WindGust
+	case "rainrate":
+		v = cur.RainRate
+	}
+	s.reply(w, r, v, 0, "")
+}
+
 func (s *Server) sensorDescription(sensor string) string {
 	switch strings.ToLower(sensor) {
 	case "cloudcover":
@@ -174,6 +241,12 @@ func (s *Server) sensorDescription(sensor string) string {
 		return "Mean luminance (0-255) of the upper sky from the auto-exposed all-sky camera. Instrumental units, not lux."
 	case "skyquality":
 		return "skyq transparency index: median of recent light frames as % of clear-sky baseline. Not mag/arcsec^2."
+	case "temperature", "humidity", "pressure", "dewpoint",
+		"windspeed", "winddirection", "windgust", "rainrate":
+		if s.Weather != nil {
+			return "OpenWeatherMap current conditions for the site coordinates (dew point derived via Magnus)."
+		}
+		return "not implemented"
 	default:
 		return "not implemented"
 	}

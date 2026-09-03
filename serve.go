@@ -16,6 +16,7 @@ import (
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/config"
 	"github.com/exploded/skyq/internal/live"
+	"github.com/exploded/skyq/internal/owm"
 	"github.com/exploded/skyq/internal/server"
 	"github.com/exploded/skyq/internal/store"
 	db "github.com/exploded/skyq/internal/store/db"
@@ -73,8 +74,27 @@ func runServe(cfg *config.Config, loc *time.Location) error {
 	defer stop()
 	go engine.Run(ctx)
 
-	alpacaSrv := &http.Server{Addr: cfg.AlpacaAddr, Handler: alpaca.New(engine).Handler()}
-	liveSrv := &http.Server{Addr: cfg.LiveAddr, Handler: server.New(engine, loc).Handler()}
+	// Optional OpenWeatherMap pass-through: ambient conditions for the
+	// Alpaca device and the live page. skyq's own cloud signal is never
+	// taken from OWM.
+	var weather *owm.Poller
+	if cfg.OpenWeatherMapAPIKey != "" {
+		weather = owm.New(owm.Options{
+			APIKey: cfg.OpenWeatherMapAPIKey,
+			Lat:    cfg.Latitude, Lon: cfg.Longitude,
+		})
+		go weather.Run(ctx)
+		log.Println("OpenWeatherMap pass-through enabled (ambient sensors on the Alpaca device)")
+	}
+
+	alpacaDev := alpaca.New(engine)
+	webSrv := server.New(engine, loc)
+	if weather != nil {
+		alpacaDev.Weather = weather
+		webSrv.Weather = weather
+	}
+	alpacaSrv := &http.Server{Addr: cfg.AlpacaAddr, Handler: alpacaDev.Handler()}
+	liveSrv := &http.Server{Addr: cfg.LiveAddr, Handler: webSrv.Handler()}
 
 	fail := make(chan error, 2)
 	go func() {

@@ -15,6 +15,7 @@
   "live_addr": ":8996",
   "poll_seconds": 60,
   "max_still_age_minutes": 5,
+  "openweathermap_api_key": "",
   "publish": {
     "enabled": false,
     "host": "172.105.178.43",
