@@ -11,6 +11,12 @@
   "band_bottom": 0.30,
   "volatility_window": 10,
   "volatility_threshold": 6.0,
+  "latitude": -37.8,
+  "longitude": 145.0,
+  "alpaca_addr": "127.0.0.1:11112",
+  "live_addr": ":8996",
+  "poll_seconds": 60,
+  "max_still_age_minutes": 5,
   "publish": {
     "enabled": false,
     "host": "172.105.178.43",

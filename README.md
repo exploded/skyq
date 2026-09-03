@@ -14,7 +14,7 @@ See `SPEC.md` for the full design and the validated acceptance numbers.
 skyq report    [--night 2026-09-02]   analyse one night, write + publish the report
 skyq backfill  [--nights 30]          run report for recent nights with logs
 skyq calibrate [--night 2026-09-02]   suggest a volatility threshold from a clear night
-skyq serve                            Phase 2 live monitor (not yet implemented)
+skyq serve                            Phase 2 live monitor (Alpaca device + live page)
 ```
 
 All commands take `--config config.json` (default `./config.json`).
@@ -38,6 +38,31 @@ All commands take `--config config.json` (default `./config.json`).
    Deployment is just `skyq.exe`, `config.json` and `run-report.bat` in one
    folder — templates and styles are embedded in the binary, and `cache\`,
    `skyq.db` and `reports\` are created next to it.
+
+## Live monitor (Phase 2)
+
+`skyq serve` runs all night: it polls allsky.local for new stills (shared
+cache with the morning report), gates cloud detection on astronomical
+darkness (set `latitude`/`longitude` in config) and data freshness, tails
+tonight's N.I.N.A. log for a live transparency index, and exposes:
+
+- **Alpaca ObservingConditions** on `alpaca_addr` (default
+  `127.0.0.1:11112`, loopback — no firewall rule needed). Add it in
+  N.I.N.A. manually by address; there is deliberately no UDP discovery
+  (alpaca-switch owns port 32227 on this machine). Sensors: CloudCover
+  (volatility vs threshold, %), SkyBrightness (instrumental luminance),
+  SkyQuality (live transparency index), TimeSinceLastUpdate. Stale or
+  twilight readings answer with an Alpaca error — unknown never reads as
+  clear — and everything is advisory: this is never a SafetyMonitor and
+  nothing here may gate the roof.
+- **Live page** on `live_addr` (default `:8996`, LAN — expect one Windows
+  Firewall prompt): current state, sparkline, latest still, tonight's
+  events. Read-only; refreshes every 30 s.
+
+Task Scheduler: schedule `run-serve.bat` at startup with
+"restart the task if it fails" enabled, same user as N.I.N.A.
+Gating in sequences: use Sequencer Powerups weather expressions (e.g.
+`If CloudCover > 80` → skip autofocus) — skyq only reports.
 
 ## Publishing
 

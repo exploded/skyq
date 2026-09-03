@@ -18,9 +18,14 @@ at 09:00. No settings UI — config.json (gitignored, secrets) + CLI only.
 
 ## Layout
 
-- `main.go` / `report.go` (repo root) — subcommands: report, backfill,
-  calibrate, serve (Phase 2, stub). Root main package so `go build` works
-  in the folder, like alpaca-switch.
+- `main.go` / `report.go` / `serve.go` (repo root) — subcommands: report,
+  backfill, calibrate, serve. Root main package so `go build` works in the
+  folder, like alpaca-switch.
+- `internal/live` — Phase 2 engine: stills poller, darkness gate (riseset),
+  staleness, live index via log tailing
+- `internal/alpaca` — Alpaca ObservingConditions on 127.0.0.1:11112; no UDP
+  discovery (alpaca-switch owns 32227); management API included
+- `internal/server` — read-only HTMX 4 live page on :8996
 - `internal/ninalog` — log parser, pure; patterns validated on N.I.N.A. 3.2.0.9001
 - `internal/allsky` — luminance (pure) + stills fetch/scan
 - `internal/analysis` — baselines, index, cloud detection, event attribution

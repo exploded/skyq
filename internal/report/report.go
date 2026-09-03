@@ -23,6 +23,10 @@ import (
 //go:embed report.css
 var reportCSS string
 
+// CSS exposes the design-system stylesheet for the live page, which shares
+// the report's look.
+func CSS() string { return reportCSS }
+
 //go:embed page.tmpl
 var pageTmpl string
 

@@ -68,7 +68,9 @@ func main() {
 			log.Fatal(err)
 		}
 	case "serve":
-		log.Fatal("skyq serve is Phase 2 and not implemented yet")
+		if err := runServe(cfg, loc); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		usage()
 	}

@@ -415,7 +415,14 @@ self-contained file — CSS inlined, thumbnails as `data:` URIs, no external req
 **Watcher.** The stills are remote, so this is a poller, not fsnotify: every 30–60 s, list
 today's image directory on `allsky.local` (HTTP index or SMB), fetch any stills newer than
 the last seen, and remember the AllSky directory rolls over at local noon. On each new
-still: compute luminance, append a sample, recompute rolling volatility.
+still: compute luminance, append a sample, recompute rolling volatility. Stills land in the
+same cache the morning report reads, so the 09:00 sync becomes a no-op after a served night.
+
+**Darkness gate.** AllSky records from dusk and the twilight luminance ramp reads as
+volatility, so live cloud detection only counts samples inside the astronomical dark window
+(nautical twilight to nautical twilight, via `github.com/exploded/riseset` and the
+configured site latitude/longitude). Outside it — and whenever the newest still is stale —
+the cloud state is unknown, and unknown is reported as unavailable, never as clear.
 
 **Alpaca ObservingConditions device.** Implement the standard endpoints under
 `/api/v1/observingconditions/0/`. **No discovery responder** (config flag, default off):

@@ -2,16 +2,12 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -40,14 +36,14 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 	windowStart := nightStart.Add(12 * time.Hour) // local noon
 	windowEnd := windowStart.Add(24 * time.Hour)
 
-	logs, err := findLogs(cfg.NINALogDir, windowStart, windowEnd, loc)
+	logs, err := ninalog.FindNightLogs(cfg.NINALogDir, windowStart, windowEnd, loc)
 	if err != nil {
 		return err
 	}
 	if len(logs) == 0 {
 		return errNoLogs
 	}
-	res, sha, err := parseLogs(logs, loc)
+	res, sha, err := ninalog.ParseFiles(logs, loc)
 	if err != nil {
 		return err
 	}
@@ -148,64 +144,6 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		log.Printf("published to %s:%s", cfg.Publish.Host, cfg.Publish.Dest)
 	}
 	return nil
-}
-
-var reLogName = regexp.MustCompile(`^(\d{8}-\d{6})-.*\.log$`)
-
-// findLogs returns the logs whose session start falls inside the night
-// window. A session that rolls over a month boundary writes a second file
-// with the same start stamp — both match and both get parsed.
-func findLogs(dir string, start, end time.Time, loc *time.Location) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var logs []string
-	for _, e := range entries {
-		m := reLogName.FindStringSubmatch(e.Name())
-		if m == nil {
-			continue
-		}
-		at, err := time.ParseInLocation("20060102-150405", m[1], loc)
-		if err != nil {
-			continue
-		}
-		if !at.Before(start) && at.Before(end) {
-			logs = append(logs, filepath.Join(dir, e.Name()))
-		}
-	}
-	sort.Strings(logs)
-	return logs, nil
-}
-
-// parseLogs parses and merges every session log of the night and hashes
-// them all for the re-ingest guard.
-func parseLogs(paths []string, loc *time.Location) (*ninalog.Result, string, error) {
-	merged := &ninalog.Result{}
-	h := sha256.New()
-	for _, p := range paths {
-		f, err := os.Open(p)
-		if err != nil {
-			return nil, "", err
-		}
-		r, err := ninalog.Parse(io.TeeReader(f, h), loc)
-		f.Close()
-		if err != nil {
-			return nil, "", fmt.Errorf("%s: %w", filepath.Base(p), err)
-		}
-		merged.Frames = append(merged.Frames, r.Frames...)
-		merged.Events = append(merged.Events, r.Events...)
-		merged.Slews = append(merged.Slews, r.Slews...)
-		merged.TargetChanges = append(merged.TargetChanges, r.TargetChanges...)
-		merged.AFRuns = append(merged.AFRuns, r.AFRuns...)
-		merged.SolveSuccesses += r.SolveSuccesses
-		merged.Flats = append(merged.Flats, r.Flats...)
-		merged.FlatExposures = append(merged.FlatExposures, r.FlatExposures...)
-	}
-	sort.Slice(merged.Frames, func(i, j int) bool { return merged.Frames[i].At.Before(merged.Frames[j].At) })
-	sort.Slice(merged.Events, func(i, j int) bool { return merged.Events[i].At.Before(merged.Events[j].At) })
-	sort.Slice(merged.Flats, func(i, j int) bool { return merged.Flats[i].At.Before(merged.Flats[j].At) })
-	return merged, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // skySamples syncs the night's stills into the cache and measures them.

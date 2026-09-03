@@ -42,6 +42,18 @@ type Config struct {
 	VolatilityWindow    int     `json:"volatility_window"`
 	VolatilityThreshold float64 `json:"volatility_threshold"`
 
+	// Phase 2 (skyq serve). Latitude/longitude drive the astronomical
+	// darkness gate — cloud volatility only means something once nautical
+	// twilight has ended. The Alpaca API stays on loopback: N.I.N.A. is on
+	// this machine, and loopback needs no firewall rule. No UDP discovery —
+	// alpaca-switch owns port 32227 on this box.
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	AlpacaAddr     string  `json:"alpaca_addr"`
+	LiveAddr       string  `json:"live_addr"`
+	PollSeconds    int     `json:"poll_seconds"`
+	MaxStillAgeMin int     `json:"max_still_age_minutes"`
+
 	Publish Publish `json:"publish"`
 }
 
@@ -58,6 +70,10 @@ func Load(path string) (*Config, error) {
 		BandBottom:          0.30,
 		VolatilityWindow:    10,
 		VolatilityThreshold: 6.0,
+		AlpacaAddr:          "127.0.0.1:11112",
+		LiveAddr:            ":8996",
+		PollSeconds:         60,
+		MaxStillAgeMin:      5,
 	}
 	if err := json.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
