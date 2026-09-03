@@ -1,0 +1,21 @@
+{
+  "timezone": "",
+  "nina_log_dir": "",
+  "allsky_base_url": "http://allsky.local/images",
+  "allsky_username": "CHANGE_ME",
+  "allsky_password": "CHANGE_ME",
+  "cache_dir": "cache",
+  "db_path": "skyq.db",
+  "reports_dir": "reports",
+  "band_top": 0.06,
+  "band_bottom": 0.30,
+  "volatility_window": 10,
+  "volatility_threshold": 6.0,
+  "publish": {
+    "enabled": false,
+    "host": "172.105.178.43",
+    "port": 2222,
+    "user": "deploy",
+    "dest": "/var/www/deepspaceplace/reports"
+  }
+}

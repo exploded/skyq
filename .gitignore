@@ -1,0 +1,7 @@
+.env
+*.db*
+.local/
+config.json
+skyq.exe
+reports/
+cache/
