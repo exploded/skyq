@@ -81,6 +81,25 @@ func TestLuminanceRealStill(t *testing.T) {
 	t.Logf("real still luminance: %.2f", got)
 }
 
+// TestLuminanceRealCloudPeak: the 05:19 still is the night's moonlit-cloud
+// peak — the prototype measured 88.9 there. The moonlit cloud must read far
+// brighter than the clear sky.
+func TestLuminanceRealCloudPeak(t *testing.T) {
+	f, err := os.Open("../../testdata/stills/image-20260903051912.jpg")
+	if err != nil {
+		t.Skip("real still not present")
+	}
+	defer f.Close()
+	got, err := Luminance(f, DefaultBandTop, DefaultBandBottom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got < 60 {
+		t.Errorf("peak-cloud still luminance = %.2f, expected well above the 25–30 clear baseline", got)
+	}
+	t.Logf("peak-cloud still luminance: %.2f (prototype: 88.9)", got)
+}
+
 func TestParseStillTime(t *testing.T) {
 	at, ok := ParseStillTime("image-20260902232414.jpg", time.UTC)
 	if !ok {

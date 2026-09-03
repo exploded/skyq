@@ -59,7 +59,11 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 
 	// All-sky stills: sync from allsky.local (best effort — the analysis
 	// still runs on the log alone if the box is unreachable), then measure.
-	samples, stills := skySamples(cfg, loc, night, windowStart, windowEnd)
+	// Sampling is clamped to the imaging session: AllSky records from dusk,
+	// and the twilight luminance ramp reads as volatility, firing a false
+	// cloud onset before the first frame (seen on real data: "onset" 20:37).
+	sampleStart, sampleEnd := res.Frames[0].At, res.Frames[len(res.Frames)-1].At.Add(30*time.Minute)
+	samples, stills := skySamples(cfg, loc, night, sampleStart, sampleEnd)
 	onset, hasOnset := analysis.DetectOnset(samples, cfg.VolatilityWindow, cfg.VolatilityThreshold)
 	if hasOnset {
 		log.Printf("cloud onset %s (volatility > %.1f)", onset.Format("15:04"), cfg.VolatilityThreshold)
@@ -224,6 +228,12 @@ func skySamples(cfg *config.Config, loc *time.Location, night string, start, end
 // pre-cloud median bootstraps it, exactly as the prototype did.
 func chooseBaselines(ctx context.Context, q *db.Queries, frames []ninalog.Frame, onset time.Time, hasOnset bool, night string) (map[analysis.BaselineKey]analysis.Baseline, string) {
 	self := analysis.Baselines(frames, onset, hasOnset)
+	if len(self) == 0 && hasOnset {
+		// Onset before any light frame would leave no baseline at all;
+		// a whole-night baseline (cloud included) beats no index.
+		log.Printf("WARNING: no pre-onset light frames; baseline uses the whole night including cloud")
+		self = analysis.Baselines(frames, onset, false)
+	}
 	out := make(map[analysis.BaselineKey]analysis.Baseline, len(self))
 	historical := 0
 	for k, v := range self {
@@ -281,9 +291,16 @@ type ingestInput struct {
 // no-op (keyed on the sha); a changed log replaces the night's rows so
 // development re-runs never double frames.
 func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) error {
+	onsetStr := sql.NullString{}
+	if in.hasOnset {
+		onsetStr = sql.NullString{String: in.onset.UTC().Format(time.RFC3339), Valid: true}
+	}
 	if existing, err := q.GetNight(ctx, in.night); err == nil {
-		if existing.LogSha256 == in.sha {
-			log.Printf("night %s already ingested (log unchanged)", in.night)
+		// No-op only when both the log AND the all-sky conclusion are
+		// unchanged — stills keep arriving after early re-runs, and a
+		// changed onset changes every downstream number.
+		if existing.LogSha256 == in.sha && existing.CloudOnsetAt == onsetStr {
+			log.Printf("night %s already ingested (log and onset unchanged)", in.night)
 			return nil
 		}
 		log.Printf("night %s changed — replacing", in.night)
@@ -298,10 +315,6 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 
 	if err := qtx.DeleteNight(ctx, in.night); err != nil {
 		return err
-	}
-	onsetStr := sql.NullString{}
-	if in.hasOnset {
-		onsetStr = sql.NullString{String: in.onset.UTC().Format(time.RFC3339), Valid: true}
 	}
 	if err := qtx.CreateNight(ctx, db.CreateNightParams{
 		NightOf: in.night, LogPath: in.logPath, LogSha256: in.sha,
