@@ -15,6 +15,10 @@ import (
 	"os"
 	"time"
 
+	// Embed the IANA timezone database: the NUC has no Go install, so
+	// without this "Australia/Melbourne" is an unknown zone there.
+	_ "time/tzdata"
+
 	"github.com/exploded/skyq/internal/config"
 )
 
