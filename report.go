@@ -218,10 +218,12 @@ func skySamples(cfg *config.Config, loc *time.Location, night string, start, end
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		if fetched, err := f.Sync(ctx, dateDir); err != nil {
-			log.Printf("stills sync from %s failed (continuing with cache): %v", cfg.AllSkyBaseURL, err)
-		} else if len(fetched) > 0 {
+		fetched, err := f.Sync(ctx, dateDir)
+		if len(fetched) > 0 {
 			log.Printf("fetched %d new stills", len(fetched))
+		}
+		if err != nil {
+			log.Printf("stills sync from %s incomplete (continuing with what's cached): %v", cfg.AllSkyBaseURL, err)
 		}
 	}
 	all, err := allsky.ScanDir(filepath.Join(cfg.CacheDir, dateDir), loc)

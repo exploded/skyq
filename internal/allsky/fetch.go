@@ -78,15 +78,29 @@ func (f *Fetcher) Sync(ctx context.Context, dateDir string) ([]string, error) {
 		return nil, err
 	}
 	var fetched []string
+	var failed int
+	var lastErr error
 	for _, name := range names {
 		dest := filepath.Join(dir, name)
 		if _, err := os.Stat(dest); err == nil {
 			continue
 		}
 		if err := f.download(ctx, dateDir, name, dest); err != nil {
-			return fetched, fmt.Errorf("fetching %s/%s: %w", dateDir, name, err)
+			// One bad file (mid-write on the Pi, a permissions hiccup)
+			// must not abort the night's sync — skip it and keep going.
+			// A cancelled context stops the loop: every remaining file
+			// would fail the same way.
+			failed++
+			lastErr = fmt.Errorf("fetching %s/%s: %w", dateDir, name, err)
+			if ctx.Err() != nil {
+				break
+			}
+			continue
 		}
 		fetched = append(fetched, dest)
+	}
+	if failed > 0 {
+		return fetched, fmt.Errorf("%d of %d stills failed, e.g. %w", failed, len(names), lastErr)
 	}
 	return fetched, nil
 }

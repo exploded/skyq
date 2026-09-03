@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -133,9 +134,14 @@ func TestFetcherSync(t *testing.T) {
 		case "/images/20260902/":
 			w.Write([]byte(`<html><a href="image-20260902232414.jpg">image-20260902232414.jpg</a>` +
 				`<a href="image-20260902232514.jpg">image-20260902232514.jpg</a>` +
+				`<a href="image-20260902232614.jpg">image-20260902232614.jpg</a>` +
 				`<a href="keogram-20260902.jpg">keogram</a></html>`))
 		case "/images/20260902/image-20260902232414.jpg", "/images/20260902/image-20260902232514.jpg":
 			w.Write(stillBytes)
+		case "/images/20260902/image-20260902232614.jpg":
+			// A mid-write or permission-broken file on the Pi: one bad
+			// still must not abort the rest of the night's sync.
+			w.WriteHeader(http.StatusForbidden)
 		default:
 			http.NotFound(w, r)
 		}
@@ -146,19 +152,19 @@ func TestFetcherSync(t *testing.T) {
 	f := &Fetcher{BaseURL: srv.URL + "/images", Username: "james", Password: "secret", CacheDir: cache}
 
 	fetched, err := f.Sync(context.Background(), "20260902")
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "1 of 3 stills failed") {
+		t.Fatalf("want a 1-of-3 skip error, got %v", err)
 	}
 	if len(fetched) != 2 {
-		t.Fatalf("fetched %d files, want 2: %v", len(fetched), fetched)
+		t.Fatalf("fetched %d files, want 2 despite the forbidden one: %v", len(fetched), fetched)
 	}
 	if !authed {
 		t.Error("server never saw valid basic auth")
 	}
-	// Second sync is a no-op.
+	// Second sync re-attempts only the failed file.
 	fetched, err = f.Sync(context.Background(), "20260902")
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Error("still-forbidden file should still report an error")
 	}
 	if len(fetched) != 0 {
 		t.Errorf("re-sync fetched %d files, want 0", len(fetched))
