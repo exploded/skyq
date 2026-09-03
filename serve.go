@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -93,12 +95,21 @@ func runServe(cfg *config.Config, loc *time.Location) error {
 		alpacaDev.Weather = weather
 		webSrv.Weather = weather
 	}
+
+	// Discovery responder: shares UDP 32227 with alpaca-switch
+	// (SO_REUSEADDR, per the Alpaca spec) so N.I.N.A. finds the device
+	// without manual setup. A failed bind only costs auto-discovery.
+	if _, portStr, err := net.SplitHostPort(cfg.AlpacaAddr); err == nil {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			go alpaca.StartDiscovery(ctx, port)
+		}
+	}
 	alpacaSrv := &http.Server{Addr: cfg.AlpacaAddr, Handler: alpacaDev.Handler()}
 	liveSrv := &http.Server{Addr: cfg.LiveAddr, Handler: webSrv.Handler()}
 
 	fail := make(chan error, 2)
 	go func() {
-		log.Printf("Alpaca ObservingConditions on http://%s/api/v1/observingconditions/0/ (no discovery — add manually in N.I.N.A.)", cfg.AlpacaAddr)
+		log.Printf("Alpaca ObservingConditions on http://%s/api/v1/observingconditions/0/", cfg.AlpacaAddr)
 		if err := alpacaSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fail <- fmt.Errorf("alpaca listener: %w", err)
 		}

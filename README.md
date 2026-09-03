@@ -48,10 +48,13 @@ cache with the morning report), gates cloud detection on astronomical
 darkness (set `latitude`/`longitude` in config) and data freshness, tails
 tonight's N.I.N.A. log for a live transparency index, and exposes:
 
-- **Alpaca ObservingConditions** on `alpaca_addr` (default
-  `127.0.0.1:11112`, loopback — no firewall rule needed). Add it in
-  N.I.N.A. manually by address; there is deliberately no UDP discovery
-  (alpaca-switch owns port 32227 on this machine). Sensors: CloudCover
+- **Alpaca ObservingConditions** on `alpaca_addr` (default `:11112`).
+  N.I.N.A. finds it by standard Alpaca UDP discovery: skyq and
+  alpaca-switch share port 32227 with SO_REUSEADDR (per the Alpaca spec —
+  needs an alpaca-switch build from 2026-09-03 or later; with an older
+  build skyq logs a warning and only auto-discovery is lost). Discovery
+  replies carry the machine's LAN address, so the API binds all
+  interfaces, not loopback. Sensors: CloudCover
   (volatility vs threshold, %), SkyBrightness (instrumental luminance),
   SkyQuality (live transparency index), TimeSinceLastUpdate. Stale or
   twilight readings answer with an Alpaca error — unknown never reads as

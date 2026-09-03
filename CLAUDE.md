@@ -23,8 +23,10 @@ at 09:00. No settings UI — config.json (gitignored, secrets) + CLI only.
   folder, like alpaca-switch.
 - `internal/live` — Phase 2 engine: stills poller, darkness gate (riseset),
   staleness, live index via log tailing
-- `internal/alpaca` — Alpaca ObservingConditions on 127.0.0.1:11112; no UDP
-  discovery (alpaca-switch owns 32227); management API included
+- `internal/alpaca` — Alpaca ObservingConditions on :11112; discovery
+  shares UDP 32227 with alpaca-switch via SO_REUSEADDR (both repos changed
+  2026-09-03 — needs the shareable alpaca-switch build); management API
+  included
 - `internal/server` — read-only HTMX 4 live page on :8996
 - `internal/ninalog` — log parser, pure; patterns validated on N.I.N.A. 3.2.0.9001
 - `internal/allsky` — luminance (pure) + stills fetch/scan

@@ -425,11 +425,15 @@ configured site latitude/longitude). Outside it — and whenever the newest stil
 the cloud state is unknown, and unknown is reported as unavailable, never as clear.
 
 **Alpaca ObservingConditions device.** Implement the standard endpoints under
-`/api/v1/observingconditions/0/`. **No discovery responder** (config flag, default off):
-`alpaca-switch` on this same machine already binds UDP 32227 and dies with `log.Fatalf` if
-that bind fails, so a second responder is a fight nobody wins. N.I.N.A. is local — add the
-device manually as `127.0.0.1:11112`, once. Bind the Alpaca API to `127.0.0.1` by default
-(also avoids Windows Firewall prompts) on a port distinct from alpaca-switch's 11111. Map:
+`/api/v1/observingconditions/0/`. **Discovery responder shares UDP 32227** with
+`alpaca-switch` via SO_REUSEADDR, as the Alpaca discovery spec directs for machines running
+several Alpaca servers: each hears the broadcast and replies with its own API port, and the
+client queries every responder. (Both programs were changed on 2026-09-03 to bind shareably;
+N.I.N.A. turned out to have no manual add-by-address for Alpaca, so discovery is the only
+path into its device chooser.) A failed bind — an old exclusive alpaca-switch — logs a
+warning and costs only auto-discovery. Discovery replies carry the machine's LAN address,
+so the Alpaca API binds all interfaces (`:11112`), on a port distinct from alpaca-switch's
+11111. Map:
 
 - `CloudCover` → 0–100, derived from volatility against the configured threshold
 - `SkyQuality` → the transparency index if a current one is available

@@ -2,10 +2,11 @@
 // ObservingConditions device — advisory weather data only, never a
 // SafetyMonitor (SPEC §8: transparency must never gate the roof).
 //
-// There is deliberately no UDP discovery responder: alpaca-switch on this
-// machine owns port 32227 and log.Fatalfs if the bind fails. N.I.N.A. adds
-// the device manually by address, which probes the management API, so that
-// is implemented even without discovery.
+// Discovery: skyq and alpaca-switch share UDP 32227 with SO_REUSEADDR, as
+// the Alpaca spec directs for machines running several Alpaca servers —
+// each hears the broadcast and answers with its own port (discovery.go).
+// N.I.N.A. has no manual add-by-address for Alpaca, so discovery is the
+// only way the device appears in its chooser.
 //
 // Unknown ≠ unsafe: a stale or twilight reading answers with an Alpaca
 // error (ValueNotSet, 1026), which clients display as unavailable. It is
