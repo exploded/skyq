@@ -22,8 +22,10 @@ All commands take `--config config.json` (default `./config.json`).
 ## Setup on the NUC
 
 1. Build: `go build` (the main package lives at the repo root)
-2. `copy config.example.json config.json` and fill in the AllSky credentials
-   (`config.json` is gitignored — never commit it).
+2. `copy config.example.json config.json` and fill in the paths and
+   coordinates (`config.json` is gitignored — never commit it). The AllSky
+   `/images/` listing is open HTTP; if it ever gains Basic auth, add
+   `allsky_username` / `allsky_password` back to config.json.
 3. Test a night: `skyq.exe report --night 2026-09-02`
 4. Task Scheduler: create a daily task at 09:00 running `run-report.bat`
    (it cds to its own folder and appends output to `skyq-report.log`).
