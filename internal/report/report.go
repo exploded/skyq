@@ -74,7 +74,7 @@ type pageData struct {
 	Legend           []legendItem
 	IndexChart       template.HTML
 	LumChart         template.HTML
-	DividerLabel     string
+	MultiTarget      bool
 	BaselineModeNote string
 	HasOnset         bool
 	OnsetHM          string
@@ -142,13 +142,13 @@ func Render(in Input) ([]byte, error) {
 		Bands: bands, Events: marks,
 		YFmt: func(v float64) string { return fmt.Sprintf("%.0f", v) },
 	}
-	dividerLabel := ""
-	if len(in.TargetChanges) > 1 {
-		tc := in.TargetChanges[len(in.TargetChanges)-1]
-		d := toMin(tc.At)
-		opts.Divider = &d
-		opts.DividerLabel = "→ " + tc.Name
-		dividerLabel = tc.Name
+	// Name the night's first target at the plot's top left, and rule every
+	// subsequent target change — a night can have more than two targets.
+	if len(in.TargetChanges) > 0 {
+		opts.StartLabel = in.TargetChanges[0].Name
+		for _, tc := range in.TargetChanges[1:] {
+			opts.Dividers = append(opts.Dividers, Divider{M: toMin(tc.At), Label: "→ " + tc.Name})
+		}
 	}
 	indexChart := RenderChart(series, opts)
 
@@ -172,7 +172,7 @@ func Render(in Input) ([]byte, error) {
 		Legend:           legend,
 		IndexChart:       template.HTML(indexChart),
 		LumChart:         template.HTML(lumChart),
-		DividerLabel:     esc(dividerLabel),
+		MultiTarget:      len(in.TargetChanges) > 1,
 		BaselineModeNote: baselineNote(in.BaselineMode),
 		HasOnset:         in.HasOnset,
 		OnsetHM:          hm(in.Onset),

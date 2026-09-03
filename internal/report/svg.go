@@ -39,24 +39,31 @@ type EventMark struct {
 // Band is a shaded autofocus window.
 type Band struct{ M0, M1 float64 }
 
+// Divider is a dashed vertical rule at a target change, labelled with the
+// new target's name.
+type Divider struct {
+	M     float64
+	Label string
+}
+
 // ChartOpts mirrors the reference builder's options object.
 type ChartOpts struct {
-	H            int     // viewBox height: 320 index, 210 luminance
-	YMax         float64 // values clamp here rather than escaping the plot
-	YTicks       int
-	GapMin       float64 // start a new subpath when a gap exceeds this
-	YLabel       string
-	Rail         bool // event rail below the plot (B becomes 44)
-	Ref          *float64
-	RefLabel     string
-	Divider      *float64
-	DividerLabel string
-	SpanMin      float64   // chart span in minutes
-	TickStart    float64   // minutes offset of the first hour tick
-	TickLabel    func(m float64) string
-	Bands        []Band
-	Events       []EventMark
-	YFmt         func(v float64) string
+	H          int     // viewBox height: 320 index, 210 luminance
+	YMax       float64 // values clamp here rather than escaping the plot
+	YTicks     int
+	GapMin     float64 // start a new subpath when a gap exceeds this
+	YLabel     string
+	Rail       bool // event rail below the plot (B becomes 44)
+	Ref        *float64
+	RefLabel   string
+	Dividers   []Divider // one per target change (CHARTS.md draw order 7)
+	StartLabel string    // the night's first target, named at the plot's top left
+	SpanMin    float64   // chart span in minutes
+	TickStart  float64   // minutes offset of the first hour tick
+	TickLabel  func(m float64) string
+	Bands      []Band
+	Events     []EventMark
+	YFmt       func(v float64) string
 }
 
 const (
@@ -105,9 +112,12 @@ func RenderChart(series []Series, o ChartOpts) string {
 		fmt.Fprintf(&b, `<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" class="refline"/>`, padL, chartW-padR, Y(*o.Ref), Y(*o.Ref))
 		fmt.Fprintf(&b, `<text x="%d" y="%.1f" class="reftxt" text-anchor="end">%s</text>`, chartW-padR-2, Y(*o.Ref)-6, esc(o.RefLabel))
 	}
-	if o.Divider != nil {
-		fmt.Fprintf(&b, `<line x1="%.1f" x2="%.1f" y1="%d" y2="%.1f" class="refline"/>`, X(*o.Divider), X(*o.Divider), padT, padT+ph)
-		fmt.Fprintf(&b, `<text x="%.1f" y="%d" class="reftxt">%s</text>`, X(*o.Divider)+5, padT+11, esc(o.DividerLabel))
+	if o.StartLabel != "" {
+		fmt.Fprintf(&b, `<text x="%d" y="%d" class="reftxt">%s</text>`, padL+6, padT+11, esc(o.StartLabel))
+	}
+	for _, dv := range o.Dividers {
+		fmt.Fprintf(&b, `<line x1="%.1f" x2="%.1f" y1="%d" y2="%.1f" class="refline"/>`, X(dv.M), X(dv.M), padT, padT+ph)
+		fmt.Fprintf(&b, `<text x="%.1f" y="%d" class="reftxt">%s</text>`, X(dv.M)+5, padT+11, esc(dv.Label))
 	}
 	// 8–9. series: line, markers, direct label
 	for _, s := range series {

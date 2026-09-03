@@ -20,7 +20,8 @@
 <div class="card">
   <h2>Normalised transparency index, by filter</h2>
   <p class="note">100 = that target and filter's own clear&#8209;sky median ({{.BaselineModeNote}}). Shaded columns are
-  autofocus runs;{{if .DividerLabel}} the vertical rule is the target change to {{.DividerLabel}};{{end}} ticks along the base are errors.</p>
+  autofocus runs; the first target is named at the top left{{if .MultiTarget}} and dashed vertical rules mark each target change{{end}};
+  ticks along the base are errors.</p>
   <div class="legend">
 {{range .Legend}}    <span><i class="dot" style="background:{{.Color}}"></i>{{.Label}}</span>
 {{end}}    <span style="color:var(--critical)">&#9650;<span style="color:var(--text-secondary)">&nbsp;Plate solve failed</span></span>
