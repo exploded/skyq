@@ -87,6 +87,7 @@ type pageData struct {
 	Events           []eventRow
 	EventNote        string
 	Frames           []frameRow
+	FlatCount        int
 	Foot             string
 	CSS              template.CSS
 	ChartsJSON       template.JS
@@ -185,6 +186,7 @@ func Render(in Input) ([]byte, error) {
 		Events:           eventRows(in.Events),
 		EventNote:        eventNote,
 		Frames:           frameRows(in),
+		FlatCount:        len(in.Flats),
 		Foot: "Star counts come from Hocus Focus detection on each saved sub, tagged with the filter in place " +
 			"at exposure start and the target then being imaged. Frames inside completed autofocus runs are excluded. " +
 			"Still capture times come from the AllSky filenames. All times are local.",

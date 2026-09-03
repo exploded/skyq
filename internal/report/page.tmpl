@@ -60,7 +60,7 @@
 {{range .Events}}    <div class="evrow"><time>{{.Time}}</time><span class="pill">{{.Kind}}</span><span>{{.Detail}}</span><span class="pill">{{.Cause}}</span></div>
 {{end}}  </div>
   <details>
-    <summary>All {{len .Frames}} frames</summary>
+    <summary>All {{len .Frames}} frames{{if .FlatCount}} (excludes the {{.FlatCount}} sky flats — no stars to detect){{end}}</summary>
     <table><thead><tr><th>Time</th><th>Class</th><th>Target</th><th>Filter</th><th>Exp</th><th>Stars</th><th>HFR</th><th>Index</th></tr></thead><tbody>
 {{range .Frames}}      <tr><td>{{.Time}}</td><td>{{.Class}}</td><td>{{.Target}}</td><td>{{.Filter}}</td><td>{{.Exp}}</td><td>{{.Stars}}</td><td>{{.HFR}}</td><td>{{.Index}}</td></tr>
 {{end}}    </tbody></table>
