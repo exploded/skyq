@@ -118,6 +118,33 @@ func TestTargetsAndSlews(t *testing.T) {
 	}
 }
 
+func TestFlats(t *testing.T) {
+	res := parseFixture(t)
+	byFilter := map[string]int{}
+	for _, fl := range res.Flats {
+		byFilter[fl.Filter]++
+	}
+	if len(res.Flats) != 60 {
+		t.Errorf("flats = %d, want 60", len(res.Flats))
+	}
+	for _, f := range []string{"H", "O", "S"} {
+		if byFilter[f] != 20 {
+			t.Errorf("flats filter %s = %d, want 20", f, byFilter[f])
+		}
+	}
+	if len(res.FlatExposures) != 3 {
+		t.Errorf("flat exposures found = %d, want 3 (%v)", len(res.FlatExposures), res.FlatExposures)
+	}
+	for _, e := range res.Events {
+		if e.Kind == FlatsFailed {
+			t.Errorf("unexpected flats failure event at %s — all three searches converged", e.At.Format("15:04:05"))
+		}
+	}
+	if first := res.Flats[0].At.Format("15:04"); first != "06:30" {
+		t.Errorf("first flat at %s, want 06:30", first)
+	}
+}
+
 func TestFailureEvents(t *testing.T) {
 	res := parseFixture(t)
 	counts := map[EventKind]int{}

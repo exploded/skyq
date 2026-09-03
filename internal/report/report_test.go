@@ -69,6 +69,8 @@ func TestRenderFixtureNight(t *testing.T) {
 		BaselineMode:  "self",
 		Stills:        stills,
 		Untrustworthy: untrust,
+		Flats:         res.Flats,
+		FlatExposures: res.FlatExposures,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +78,7 @@ func TestRenderFixtureNight(t *testing.T) {
 	page := string(html)
 
 	for _, want := range []string{
+		"Morning sky flats: 60 frames (H 20, O 20, S 20)",
 		`viewBox="0 0 940 320"`, // index chart
 		`viewBox="0 0 940 210"`, // luminance chart
 		"clear-sky baseline",

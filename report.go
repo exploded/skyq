@@ -63,10 +63,34 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 	// and the twilight luminance ramp reads as volatility, firing a false
 	// cloud onset before the first frame (seen on real data: "onset" 20:37).
 	sampleStart, sampleEnd := res.Frames[0].At, res.Frames[len(res.Frames)-1].At.Add(30*time.Minute)
+	if n := len(res.Flats); n > 0 {
+		// Dawn flats can run past the last light frame; cover them so the
+		// unstable-sky check below has data.
+		if end := res.Flats[n-1].At.Add(10 * time.Minute); end.After(sampleEnd) {
+			sampleEnd = end
+		}
+	}
 	samples, stills := skySamples(cfg, loc, night, sampleStart, sampleEnd)
 	onset, hasOnset := analysis.DetectOnset(samples, cfg.VolatilityWindow, cfg.VolatilityThreshold)
 	if hasOnset {
 		log.Printf("cloud onset %s (volatility > %.1f)", onset.Format("15:04"), cfg.VolatilityThreshold)
+	}
+
+	// Dawn cloud during sky flats puts gradients in them — worth a warning
+	// while the frames are still easy to retake.
+	flatsUnstable := false
+	if len(res.Flats) > 0 {
+		vol := analysis.VolatilitySeries(samples, cfg.VolatilityWindow)
+		f0, f1 := res.Flats[0].At, res.Flats[len(res.Flats)-1].At
+		for i, s := range samples {
+			if !s.At.Before(f0) && !s.At.After(f1) && vol[i] > cfg.VolatilityThreshold {
+				flatsUnstable = true
+				break
+			}
+		}
+		if flatsUnstable {
+			log.Printf("WARNING: unstable sky during flats (%s–%s)", f0.Format("15:04"), f1.Format("15:04"))
+		}
 	}
 
 	sdb, err := store.Open(cfg.DBPath)
@@ -103,6 +127,7 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		Onset: onset, HasOnset: hasOnset,
 		Baselines: baselines, BaselineMode: mode,
 		Stills: stills, Untrustworthy: untrust,
+		Flats: res.Flats, FlatExposures: res.FlatExposures, FlatsUnstableSky: flatsUnstable,
 	})
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
@@ -174,9 +199,12 @@ func parseLogs(paths []string, loc *time.Location) (*ninalog.Result, string, err
 		merged.TargetChanges = append(merged.TargetChanges, r.TargetChanges...)
 		merged.AFRuns = append(merged.AFRuns, r.AFRuns...)
 		merged.SolveSuccesses += r.SolveSuccesses
+		merged.Flats = append(merged.Flats, r.Flats...)
+		merged.FlatExposures = append(merged.FlatExposures, r.FlatExposures...)
 	}
 	sort.Slice(merged.Frames, func(i, j int) bool { return merged.Frames[i].At.Before(merged.Frames[j].At) })
 	sort.Slice(merged.Events, func(i, j int) bool { return merged.Events[i].At.Before(merged.Events[j].At) })
+	sort.Slice(merged.Flats, func(i, j int) bool { return merged.Flats[i].At.Before(merged.Flats[j].At) })
 	return merged, hex.EncodeToString(h.Sum(nil)), nil
 }
 

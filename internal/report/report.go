@@ -42,6 +42,10 @@ type Input struct {
 	BaselineMode  string // "self" | "historical"
 	Stills        []allsky.Still
 	Untrustworthy []ninalog.AFRun
+
+	Flats            []ninalog.FlatFrame
+	FlatExposures    []float64
+	FlatsUnstableSky bool // all-sky volatility crossed the threshold during flats
 }
 
 // filterSlots maps filters to their fixed palette slots (CHARTS.md rule 2:
@@ -330,12 +334,52 @@ func narrate(in Input) (string, []stat, string) {
 	for _, r := range in.Untrustworthy {
 		fmt.Fprintf(&v, "The %s autofocus run fitted its curve on almost no stars and should not be trusted. ", r.Start.Format("15:04"))
 	}
+	if s := flatsSentence(in); s != "" {
+		v.WriteString(s)
+	}
 
 	note := "All observatory events with their attributed causes."
 	if causes[analysis.CausePostSlew] == 1 && in.HasOnset {
 		note = "Only the post-slew event predates the cloud — PHD2 failing to settle on a new guide star after a slew, not a sky problem."
 	}
 	return v.String(), stats, note
+}
+
+// flatsSentence summarises the morning sky-flats session for the verdict.
+// Flats never touch the index; this is a checklist item, so you find out a
+// session quietly failed before stacking, not after.
+func flatsSentence(in Input) string {
+	if len(in.Flats) == 0 {
+		return ""
+	}
+	byFilter := map[string]int{}
+	var order []string
+	for _, fl := range in.Flats {
+		if byFilter[fl.Filter] == 0 {
+			order = append(order, fl.Filter)
+		}
+		byFilter[fl.Filter]++
+	}
+	var parts []string
+	for _, f := range order {
+		parts = append(parts, fmt.Sprintf("%s %d", f, byFilter[f]))
+	}
+	var s strings.Builder
+	fmt.Fprintf(&s, "Morning sky flats: %d frames (%s), %s–%s",
+		len(in.Flats), strings.Join(parts, ", "),
+		in.Flats[0].At.Format("15:04"), in.Flats[len(in.Flats)-1].At.Format("15:04"))
+	if len(in.FlatExposures) > 0 {
+		lo, hi := in.FlatExposures[0], in.FlatExposures[0]
+		for _, e := range in.FlatExposures {
+			lo, hi = math.Min(lo, e), math.Max(hi, e)
+		}
+		fmt.Fprintf(&s, ", auto-exposure %.1f–%.1f s", lo, hi)
+	}
+	s.WriteString(". ")
+	if in.FlatsUnstableSky {
+		s.WriteString("The all-sky camera saw unstable sky during the flats — check them for gradients before use. ")
+	}
+	return s.String()
 }
 
 func baselineNote(mode string) string {
@@ -367,6 +411,7 @@ func eventRows(events []analysis.AttributedEvent) []eventRow {
 		ninalog.AutofocusRejected: "AF rejected",
 		ninalog.AutofocusFailed:   "AF failed",
 		ninalog.DomeRefused:       "dome refused",
+		ninalog.FlatsFailed:       "flats failed",
 	}
 	var rows []eventRow
 	for _, e := range events {

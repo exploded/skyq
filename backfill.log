@@ -1,0 +1,59 @@
+2026/09/03 19:44:49 night 2026-09-02: 1 logs, 272 frames, 21 events
+2026/09/03 19:45:26 cloud onset 03:46 (volatility > 6.0)
+2026/09/03 19:45:26 baseline mode: self (6 pairs)
+2026/09/03 19:45:26 night 2026-09-02 already ingested (log and onset unchanged)
+2026/09/03 19:45:26 report written: reports\2026-09-02.html (212 KB)
+2026/09/03 19:45:27 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:45:27 night 2026-08-31: 3 logs, 243 frames, 22 events
+2026/09/03 19:46:26 fetched 2034 new stills
+2026/09/03 19:46:55 cloud onset 01:12 (volatility > 6.0)
+2026/09/03 19:46:55 baseline mode: self (5 pairs)
+2026/09/03 19:46:55 report written: reports\2026-08-31.html (175 KB)
+2026/09/03 19:46:56 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:46:56 night 2026-08-30: 5 logs, 136 frames, 1 events
+2026/09/03 19:47:45 fetched 2062 new stills
+2026/09/03 19:48:02 cloud onset 22:48 (volatility > 6.0)
+2026/09/03 19:48:02 baseline mode: self (3 pairs)
+2026/09/03 19:48:02 report written: reports\2026-08-30.html (122 KB)
+2026/09/03 19:48:03 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:48:03 night 2026-08-20: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:03 night 2026-08-17: 2 logs, 336 frames, 16 events
+2026/09/03 19:48:03 stills sync from http://allsky.local/images failed (continuing with cache): GET http://allsky.local/images/20260817/: 404 Not Found
+2026/09/03 19:48:03 no stills cache for 2026-08-17: open cache\20260817: The system cannot find the file specified.
+2026/09/03 19:48:03 baseline mode: self (3 pairs)
+2026/09/03 19:48:03 report written: reports\2026-08-17.html (70 KB)
+2026/09/03 19:48:04 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:48:04 night 2026-08-07: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:04 night 2026-08-02: 5 logs, 127 frames, 4 events
+2026/09/03 19:48:04 stills sync from http://allsky.local/images failed (continuing with cache): GET http://allsky.local/images/20260802/: 404 Not Found
+2026/09/03 19:48:04 no stills cache for 2026-08-02: open cache\20260802: The system cannot find the file specified.
+2026/09/03 19:48:04 baseline mode: self (3 pairs)
+2026/09/03 19:48:05 report written: reports\2026-08-02.html (43 KB)
+2026/09/03 19:48:06 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:48:06 night 2026-08-01: 3 logs, 235 frames, 14 events
+2026/09/03 19:48:06 stills sync from http://allsky.local/images failed (continuing with cache): GET http://allsky.local/images/20260801/: 404 Not Found
+2026/09/03 19:48:06 no stills cache for 2026-08-01: open cache\20260801: The system cannot find the file specified.
+2026/09/03 19:48:06 baseline mode: self (3 pairs)
+2026/09/03 19:48:06 report written: reports\2026-08-01.html (66 KB)
+2026/09/03 19:48:07 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:48:07 night 2026-07-30: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:07 night 2026-07-27: 2 logs, 1 frames, 0 events
+2026/09/03 19:48:07 stills sync from http://allsky.local/images failed (continuing with cache): GET http://allsky.local/images/20260727/: 404 Not Found
+2026/09/03 19:48:07 no stills cache for 2026-07-27: open cache\20260727: The system cannot find the file specified.
+2026/09/03 19:48:07 baseline mode: self (0 pairs)
+2026/09/03 19:48:07 report written: reports\2026-07-27.html (15 KB)
+2026/09/03 19:48:08 published to 172.105.178.43:/var/www/deepspaceplace/reports
+2026/09/03 19:48:08 night 2026-07-16: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-07-15: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-07-10: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-07-09: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-07-07: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-07-05: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-29: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-28: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-27: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-26: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-15: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-14: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 night 2026-06-07: logs contain no frames (daytime session?) — skipping
+2026/09/03 19:48:08 backfill complete: 7 nights

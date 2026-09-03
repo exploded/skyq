@@ -53,6 +53,13 @@ var (
 	reAFTemp   = regexp.MustCompile(`BroadcastSuccessfulAutoFocusRun\|\d+\|Autofocus notification received - Temperature ([\d.]+)`)
 	reAFReject = regexp.MustCompile(`^(\S+)\|\w+\|\S+\|ValidateCalculatedFocusPosition\|\d+\|New focus point HFR ([\d.]+) is significantly worse`)
 
+	// Sky flats: the auto-exposure search, its convergence, and each saved
+	// flat (filter read from the FLAT filename). Save lines are pinned to
+	// BaseImageData.cs — ImageSaveController logs the same path again.
+	reFlatSearch = regexp.MustCompile(`^(\S+)\|INFO\|AutoExposureFlat\.cs\|Execute\|\d+\|Determining Dynamic Exposure Time`)
+	reFlatFound  = regexp.MustCompile(`\|AutoExposureFlat\.cs\|DetermineExposureTime\|\d+\|Found exposure time at ([\d.]+)s`)
+	reFlatSave   = regexp.MustCompile(`^(\S+)\|INFO\|BaseImageData\.cs\|SaveToDisk\|\d+\|Saved image to .*[\\/]FLAT[\\/]FLAT_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_(\w+)_`)
+
 	// Failures and successes.
 	reSolveOK    = regexp.MustCompile(`\|ImageSolver\.cs\|Solve\|\d+\|Platesolve successful`)
 	reSolveFail  = regexp.MustCompile(`^(\S+)\|\w+\|ASTAPSolver\.cs\|ReadResult\|\d+\|ASTAP - Plate solve failed`)
@@ -75,7 +82,18 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 		// time mis-tags frames at every filter transition.
 		pendingExposure float64
 		pendingFilter   string
+
+		// A flat exposure search that never logs "Found exposure time"
+		// before the next search (or EOF) failed to converge.
+		openFlatSearch *time.Time
 	)
+	failOpenFlatSearch := func() {
+		if openFlatSearch != nil {
+			res.Events = append(res.Events, Event{At: *openFlatSearch, Kind: FlatsFailed,
+				Detail: "flat auto-exposure search never converged"})
+			openFlatSearch = nil
+		}
+	}
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -189,6 +207,29 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 			res.TargetChanges = append(res.TargetChanges, TargetChange{At: at, Name: m[2], RA: m[3], Dec: m[4]})
 			continue
 		}
+		if m := reFlatSearch.FindStringSubmatch(line); m != nil {
+			at, err := parseTS(m[1], loc, lineNo)
+			if err != nil {
+				return nil, err
+			}
+			failOpenFlatSearch()
+			openFlatSearch = &at
+			continue
+		}
+		if m := reFlatFound.FindStringSubmatch(line); m != nil {
+			exp, _ := strconv.ParseFloat(m[1], 64)
+			res.FlatExposures = append(res.FlatExposures, exp)
+			openFlatSearch = nil
+			continue
+		}
+		if m := reFlatSave.FindStringSubmatch(line); m != nil {
+			at, err := parseTS(m[1], loc, lineNo)
+			if err != nil {
+				return nil, err
+			}
+			res.Flats = append(res.Flats, FlatFrame{At: at, Filter: m[2]})
+			continue
+		}
 		if reSolveOK.MatchString(line) {
 			res.SolveSuccesses++
 			continue
@@ -222,6 +263,7 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("reading log: %w", err)
 	}
+	failOpenFlatSearch()
 	return res, nil
 }
 

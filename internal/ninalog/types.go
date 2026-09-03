@@ -51,6 +51,7 @@ const (
 	AutofocusRejected EventKind = "autofocus_rejected"
 	AutofocusFailed   EventKind = "autofocus_failed" // run cancelled or gave up
 	DomeRefused       EventKind = "dome_refused"
+	FlatsFailed       EventKind = "flats_failed" // exposure search never converged
 )
 
 type Event struct {
@@ -90,6 +91,14 @@ type AFRun struct {
 	Completed   bool
 }
 
+// FlatFrame is one saved flat. Flats never feed the transparency index —
+// they carry no stars — but the report accounts for them: a flats session
+// that quietly failed is found before stacking, not after.
+type FlatFrame struct {
+	At     time.Time
+	Filter string
+}
+
 // Result is everything one night's log yields.
 type Result struct {
 	Frames         []Frame
@@ -98,6 +107,8 @@ type Result struct {
 	TargetChanges  []TargetChange
 	AFRuns         []AFRun // completed runs only; §9 counts these
 	SolveSuccesses int
+	Flats          []FlatFrame
+	FlatExposures  []float64 // auto-exposure times the flat wizard settled on
 }
 
 // CompletedAFRuns is len(Result.AFRuns) by construction; kept as a method
