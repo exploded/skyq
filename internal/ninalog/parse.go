@@ -23,8 +23,10 @@ import (
 const tsLayout = "2006-01-02T15:04:05.000"
 
 var (
-	// Star detection result — the transparency measurement.
-	reStars = regexp.MustCompile(`^(\S+)\|INFO\|HocusFocusStarDetection\.cs\|BuildStarDetectionResult\|\d+\|Average HFR: ([\d.]+), HFR MAD: ([\d.]+), Detected Stars (\d+)`)
+	// Star detection result — the transparency measurement. Older Hocus
+	// Focus versions (seen in June 2026 logs) emit this from Detect, newer
+	// ones from BuildStarDetectionResult; no version logs both.
+	reStars = regexp.MustCompile(`^(\S+)\|INFO\|HocusFocusStarDetection\.cs\|(?:BuildStarDetectionResult|Detect)\|\d+\|Average HFR: ([\d.]+), HFR MAD: ([\d.]+), Detected Stars (\d+)`)
 
 	// Exposure start — gives the exposure length and (when populated) the
 	// filter for the NEXT star-detection line. The Filter field is empty for
