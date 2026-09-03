@@ -74,7 +74,8 @@ by design. Config changes take effect on the next scheduled `report` run, or aft
 
 ```
 skyq/
-├── cmd/skyq/main.go          # subcommands: report, serve, backfill
+├── main.go                   # package main at the root so a bare `go build` works
+├── report.go                 # the report/backfill/calibrate orchestration
 ├── internal/ninalog/         # log parser — pure, no I/O beyond an io.Reader
 │   ├── parse.go
 │   ├── types.go

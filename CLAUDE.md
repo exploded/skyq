@@ -18,7 +18,9 @@ at 09:00. No settings UI — config.json (gitignored, secrets) + CLI only.
 
 ## Layout
 
-- `cmd/skyq` — subcommands: report, backfill, calibrate, serve (Phase 2, stub)
+- `main.go` / `report.go` (repo root) — subcommands: report, backfill,
+  calibrate, serve (Phase 2, stub). Root main package so `go build` works
+  in the folder, like alpaca-switch.
 - `internal/ninalog` — log parser, pure; patterns validated on N.I.N.A. 3.2.0.9001
 - `internal/allsky` — luminance (pure) + stills fetch/scan
 - `internal/analysis` — baselines, index, cloud detection, event attribution

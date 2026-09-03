@@ -21,7 +21,7 @@ All commands take `--config config.json` (default `./config.json`).
 
 ## Setup on the NUC
 
-1. Build: `go build -o skyq.exe ./cmd/skyq`
+1. Build: `go build` (the main package lives at the repo root)
 2. `copy config.example.json config.json` and fill in the AllSky credentials
    (`config.json` is gitignored — never commit it).
 3. Test a night: `skyq.exe report --night 2026-09-02`
