@@ -34,8 +34,17 @@ All commands take `--config config.json` (default `./config.json`).
 
 With `publish.enabled: true`, the finished report and a regenerated index
 page are copied by `scp` (OpenSSH, `BatchMode`) to the Linode web root for
-deepspaceplace.com. The NUC needs a key in `~/.ssh` accepted by the deploy
-user; a publish failure is logged but never blocks the local report.
+deepspaceplace.com. A publish failure is logged but never blocks the local
+report. One-time setup on the machine that runs skyq:
+
+1. `ssh-keygen -t ed25519 -f %USERPROFILE%\.ssh\skyq_publish -N "" -C skyq-publish`
+   and set `publish.identity_file` to that private key path.
+2. Trust the host key once: `ssh-keyscan -p 2222 172.105.178.43 >> %USERPROFILE%\.ssh\known_hosts`
+3. On the Linode (root): append the `.pub` to `/home/deploy/.ssh/authorized_keys`,
+   and create the target dir writable by deploy:
+   `mkdir -p /var/www/deepspaceplace/reports && chown deploy:www-data /var/www/deepspaceplace/reports`
+4. Add a Caddy `handle_path`/root for `/reports` under the deepspaceplace.com
+   site if the web root differs from `dest`, then `systemctl reload caddy`.
 
 ## Data
 

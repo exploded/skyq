@@ -35,7 +35,12 @@ func Report(cfg config.Publish, reportsDir, reportFile string) error {
 
 func scp(cfg config.Publish, file string) error {
 	dest := fmt.Sprintf("%s@%s:%s/", cfg.User, cfg.Host, strings.TrimRight(cfg.Dest, "/"))
-	cmd := exec.Command("scp", "-P", fmt.Sprint(cfg.Port), "-o", "BatchMode=yes", file, dest)
+	args := []string{"-P", fmt.Sprint(cfg.Port), "-o", "BatchMode=yes"}
+	if cfg.IdentityFile != "" {
+		args = append(args, "-i", cfg.IdentityFile, "-o", "IdentitiesOnly=yes")
+	}
+	args = append(args, file, dest)
+	cmd := exec.Command("scp", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("scp %s: %v: %s", filepath.Base(file), err, strings.TrimSpace(string(out)))

@@ -17,6 +17,9 @@ type Publish struct {
 	Port    int    `json:"port"`
 	User    string `json:"user"`
 	Dest    string `json:"dest"` // remote dir, e.g. /var/www/deepspaceplace/reports
+	// IdentityFile is the OpenSSH private key used for scp. Empty falls
+	// back to the default keys / ~/.ssh/config.
+	IdentityFile string `json:"identity_file"`
 }
 
 type Config struct {

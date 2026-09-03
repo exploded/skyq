@@ -16,6 +16,7 @@
     "host": "172.105.178.43",
     "port": 2222,
     "user": "deploy",
-    "dest": "/var/www/deepspaceplace/reports"
+    "dest": "/var/www/deepspaceplace/reports",
+    "identity_file": "C:\\Users\\YOU\\.ssh\\skyq_publish"
   }
 }
