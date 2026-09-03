@@ -25,10 +25,19 @@ All commands take `--config config.json` (default `./config.json`).
 2. `copy config.example.json config.json` and fill in the AllSky credentials
    (`config.json` is gitignored — never commit it).
 3. Test a night: `skyq.exe report --night 2026-09-02`
-4. Task Scheduler: create a daily task at 09:00 running `skyq.exe report`
-   with **Start in** set to this directory, and redirect output to a log
-   file (console output is lost under the scheduler):
-   `cmd /c skyq.exe report >> skyq-report.log 2>&1`
+4. Task Scheduler: create a daily task at 09:00 running `run-report.bat`
+   (it cds to its own folder and appends output to `skyq-report.log`).
+   Run it as the same Windows user N.I.N.A. runs as, and tick "Run task as
+   soon as possible after a scheduled start is missed". Or from an admin
+   prompt:
+
+   ```
+   schtasks /Create /TN "skyq morning report" /TR "C:\skyq\run-report.bat" /SC DAILY /ST 09:00
+   ```
+
+   Deployment is just `skyq.exe`, `config.json` and `run-report.bat` in one
+   folder — templates and styles are embedded in the binary, and `cache\`,
+   `skyq.db` and `reports\` are created next to it.
 
 ## Publishing
 
