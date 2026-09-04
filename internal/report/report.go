@@ -69,6 +69,7 @@ type baselineRow struct {
 	Target, Filter string
 	Median         string
 	N              int
+	Source         string
 }
 type eventRow struct{ Time, Kind, Detail, Cause string }
 type frameRow struct {
@@ -84,6 +85,7 @@ type pageData struct {
 	LumChart         template.HTML
 	MultiTarget      bool
 	BaselineModeNote string
+	BaselineFallback string // set when some pair had no clear frames tonight
 	HasOnset         bool
 	OnsetHM          string
 	Shots            []shot
@@ -187,6 +189,7 @@ func Render(in Input) ([]byte, error) {
 		OnsetHM:          hm(in.Onset),
 		Shots:            pickShots(in),
 		Baselines:        baselineRows(in.Baselines),
+		BaselineFallback: baselineFallbackNote(in.Baselines),
 		Events:           eventRows(in.Events),
 		EventNote:        eventNote,
 		Frames:           frameRows(in),
@@ -395,11 +398,40 @@ func baselineNote(mode string) string {
 	return "this night's own pre-cloud median"
 }
 
+func baselineSource(src string) string {
+	switch src {
+	case analysis.SourceHistorical:
+		return "earlier clear nights"
+	case analysis.SourceWholeNight:
+		return "whole night, cloud included"
+	}
+	return "tonight, clear frames"
+}
+
+// baselineFallbackNote explains any divisor that is not a clear-sky median.
+func baselineFallbackNote(base map[analysis.BaselineKey]analysis.Baseline) string {
+	var relative []string
+	seen := map[string]bool{}
+	for k, v := range base {
+		if v.Source == analysis.SourceWholeNight && !seen[k.Target] {
+			seen[k.Target] = true
+			relative = append(relative, k.Target)
+		}
+	}
+	if len(relative) == 0 {
+		return ""
+	}
+	sort.Strings(relative)
+	return fmt.Sprintf("%s had no clear frames tonight and no clear history, so its divisor is its own whole-night median. "+
+		"Its index shows how the sky changed during that target, not how it compared with a clear sky.",
+		strings.Join(relative, " and "))
+}
+
 func baselineRows(base map[analysis.BaselineKey]analysis.Baseline) []baselineRow {
 	var rows []baselineRow
 	for k, v := range base {
 		rows = append(rows, baselineRow{Target: k.Target, Filter: k.Filter,
-			Median: fmt.Sprintf("%.0f", v.MedianStars), N: v.NFrames})
+			Median: fmt.Sprintf("%.0f", v.MedianStars), N: v.NFrames, Source: baselineSource(v.Source)})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Target != rows[j].Target {

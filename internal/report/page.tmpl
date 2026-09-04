@@ -47,9 +47,9 @@
 {{end}}
 <div class="card">
   <h2>Clear&#8209;sky reference medians</h2>
-  <p class="note">The divisors behind the index &mdash; median detected stars per light sub{{if .HasOnset}} before {{.OnsetHM}}{{end}}.</p>
-  <table><thead><tr><th>Target</th><th>Filter</th><th>Median stars</th><th>Frames</th></tr></thead><tbody>
-{{range .Baselines}}    <tr><td>{{.Target}}</td><td>{{.Filter}}</td><td>{{.Median}}</td><td>{{.N}}</td></tr>
+  <p class="note">The divisors behind the index &mdash; median detected stars per light sub{{if .HasOnset}} before {{.OnsetHM}}{{end}}.{{if .BaselineFallback}} {{.BaselineFallback}}{{end}}</p>
+  <table><thead><tr><th>Target</th><th>Filter</th><th>Median stars</th><th>Frames</th><th>Source</th></tr></thead><tbody>
+{{range .Baselines}}    <tr><td>{{.Target}}</td><td>{{.Filter}}</td><td>{{.Median}}</td><td>{{.N}}</td><td>{{.Source}}</td></tr>
 {{end}}  </tbody></table>
 </div>
 

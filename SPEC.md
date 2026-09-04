@@ -224,6 +224,19 @@ each night's baseline; the report must say which it used.
 "Clear" for baseline purposes = frames before the all-sky cloud onset (§4.4), or all frames
 if no onset was detected.
 
+**A target that only begins after the onset** has no clear frames tonight, so the rule above
+gives it no baseline and its frames no index (2026-09-03: onset 21:20, NGC 2070 started
+23:50, 54 subs vanished from the chart). For such a `(target, filter)` pair, in order:
+
+1. Any clear history on record — even one night — used as the rolling median above. The
+   five-night minimum only governs *switching away from* a self baseline, not rescuing a
+   pair that has none.
+2. Failing that, the pair's own whole-night median, cloud included. That index is relative
+   (how the sky changed during the target), not absolute; the report must say so, and the
+   divisor is not written to the baselines table.
+
+Pairs that do have clear frames tonight are unaffected — the §9 numbers do not move.
+
 ### 4.4 All-sky luminance and cloud detection
 
 Per still:

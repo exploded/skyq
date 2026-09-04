@@ -22,7 +22,16 @@ type BaselineKey struct {
 type Baseline struct {
 	MedianStars float64
 	NFrames     int
+	Source      string // SourceSelf | SourceHistorical | SourceWholeNight
 }
+
+// Where a baseline's divisor came from. The report says which, because a
+// whole-night divisor makes that target's index relative, not absolute.
+const (
+	SourceSelf       = "self"        // tonight's own clear (pre-onset) frames
+	SourceHistorical = "historical"  // clear frames from earlier nights
+	SourceWholeNight = "whole-night" // tonight's frames including cloud
+)
 
 // Baselines computes per-(target, filter) median detected-star counts from
 // light frames. If hasCutoff, only frames strictly before cutoff count —
@@ -41,9 +50,47 @@ func Baselines(frames []ninalog.Frame, cutoff time.Time, hasCutoff bool) map[Bas
 	}
 	out := make(map[BaselineKey]Baseline, len(counts))
 	for k, v := range counts {
-		out[k] = Baseline{MedianStars: median(v), NFrames: len(v)}
+		out[k] = Baseline{MedianStars: median(v), NFrames: len(v), Source: SourceSelf}
 	}
 	return out
+}
+
+// LightPairs lists every (target, filter) pair that has at least one light
+// frame, in first-seen order.
+func LightPairs(frames []ninalog.Frame) []BaselineKey {
+	seen := map[BaselineKey]bool{}
+	var out []BaselineKey
+	for _, f := range frames {
+		if f.Class() != ninalog.ClassLight {
+			continue
+		}
+		k := BaselineKey{f.Target, f.Filter}
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// FillWholeNight gives every light (target, filter) pair still missing from
+// base a whole-night median — cloud included — so a target that only began
+// after the cloud onset still gets an index rather than none. Such a
+// divisor is relative, not clear-sky; the entry is marked SourceWholeNight
+// so the report can say so. Returns the keys it added.
+func FillWholeNight(frames []ninalog.Frame, base map[BaselineKey]Baseline) []BaselineKey {
+	all := Baselines(frames, time.Time{}, false)
+	var added []BaselineKey
+	for _, k := range LightPairs(frames) {
+		if _, ok := base[k]; ok {
+			continue
+		}
+		b := all[k]
+		b.Source = SourceWholeNight
+		base[k] = b
+		added = append(added, k)
+	}
+	return added
 }
 
 // Index returns the transparency index for one light frame:

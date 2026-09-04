@@ -194,53 +194,75 @@ func skySamples(cfg *config.Config, loc *time.Location, night string, start, end
 // chooseBaselines uses the rolling historical median once a pair has enough
 // clear nights on record (excluding tonight); otherwise the night's own
 // pre-cloud median bootstraps it, exactly as the prototype did.
+//
+// A pair with no clear frames tonight — a target that only began after the
+// cloud onset — would otherwise have no baseline and so no index at all.
+// For those, any clear history counts (even one night); failing that, the
+// pair's whole-night median stands in and the report says the index for
+// that target is relative only.
 func chooseBaselines(ctx context.Context, q *db.Queries, frames []ninalog.Frame, onset time.Time, hasOnset bool, night string) (map[analysis.BaselineKey]analysis.Baseline, string) {
 	self := analysis.Baselines(frames, onset, hasOnset)
-	if len(self) == 0 && hasOnset {
-		// Onset before any light frame would leave no baseline at all;
-		// a whole-night baseline (cloud included) beats no index.
-		log.Printf("WARNING: no pre-onset light frames; baseline uses the whole night including cloud")
-		self = analysis.Baselines(frames, onset, false)
-	}
 	out := make(map[analysis.BaselineKey]analysis.Baseline, len(self))
 	historical := 0
 	for k, v := range self {
 		out[k] = v
-		rows, err := q.ListClearLightFrames(ctx, db.ListClearLightFramesParams{Target: k.Target, Filter: k.Filter})
-		if err != nil {
+		if h, nights, ok := historicalBaseline(ctx, q, k, night); ok && nights >= minClearNightsForHistorical {
+			out[k] = h
+			historical++
+		}
+	}
+	for _, k := range analysis.LightPairs(frames) {
+		if _, ok := out[k]; ok {
 			continue
 		}
-		perNight := map[string][]float64{}
-		for _, r := range rows {
-			if r.NightOf == night {
-				continue
-			}
-			perNight[r.NightOf] = append(perNight[r.NightOf], float64(r.DetectedStars))
+		if h, nights, ok := historicalBaseline(ctx, q, k, night); ok {
+			log.Printf("WARNING: %s/%s has no clear frames tonight; baseline uses %d earlier night(s)", k.Target, k.Filter, nights)
+			out[k] = h
+			historical++
 		}
-		if len(perNight) < minClearNightsForHistorical {
-			continue
-		}
-		nights := make([]string, 0, len(perNight))
-		for n := range perNight {
-			nights = append(nights, n)
-		}
-		sort.Sort(sort.Reverse(sort.StringSlice(nights)))
-		if len(nights) > 10 {
-			nights = nights[:10] // rolling window
-		}
-		var medians []float64
-		frameCount := 0
-		for _, n := range nights {
-			medians = append(medians, analysis.MedianHigh(perNight[n]))
-			frameCount += len(perNight[n])
-		}
-		out[k] = analysis.Baseline{MedianStars: analysis.MedianHigh(medians), NFrames: frameCount}
-		historical++
+	}
+	for _, k := range analysis.FillWholeNight(frames, out) {
+		log.Printf("WARNING: %s/%s has no clear frames tonight and no history; baseline uses the whole night including cloud", k.Target, k.Filter)
 	}
 	if historical == len(out) && historical > 0 {
 		return out, "historical"
 	}
 	return out, "self"
+}
+
+// historicalBaseline is the rolling median of per-night medians over the
+// most recent clear nights (at most 10) on record for one pair, excluding
+// tonight. ok is false when there is no history at all.
+func historicalBaseline(ctx context.Context, q *db.Queries, k analysis.BaselineKey, night string) (analysis.Baseline, int, bool) {
+	rows, err := q.ListClearLightFrames(ctx, db.ListClearLightFramesParams{Target: k.Target, Filter: k.Filter})
+	if err != nil {
+		return analysis.Baseline{}, 0, false
+	}
+	perNight := map[string][]float64{}
+	for _, r := range rows {
+		if r.NightOf == night {
+			continue
+		}
+		perNight[r.NightOf] = append(perNight[r.NightOf], float64(r.DetectedStars))
+	}
+	if len(perNight) == 0 {
+		return analysis.Baseline{}, 0, false
+	}
+	nights := make([]string, 0, len(perNight))
+	for n := range perNight {
+		nights = append(nights, n)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(nights)))
+	if len(nights) > 10 {
+		nights = nights[:10] // rolling window
+	}
+	var medians []float64
+	frameCount := 0
+	for _, n := range nights {
+		medians = append(medians, analysis.MedianHigh(perNight[n]))
+		frameCount += len(perNight[n])
+	}
+	return analysis.Baseline{MedianStars: analysis.MedianHigh(medians), NFrames: frameCount, Source: analysis.SourceHistorical}, len(nights), true
 }
 
 type ingestInput struct {
@@ -335,6 +357,9 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, b := range in.baselines {
+		if b.Source == analysis.SourceWholeNight {
+			continue // a cloud-included divisor is not a clear-sky reference
+		}
 		if err := qtx.UpsertBaseline(ctx, db.UpsertBaselineParams{
 			Target: k.Target, Filter: k.Filter, MedianStars: b.MedianStars,
 			NFrames: int64(b.NFrames), NNights: 1, UpdatedAt: now,

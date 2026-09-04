@@ -55,6 +55,49 @@ func TestBaselines(t *testing.T) {
 	}
 }
 
+// A target that only begins after the cloud onset has no clear frames, so
+// Baselines gives it nothing and its frames would have no index. The
+// whole-night fallback must fill exactly those pairs, mark them so the
+// report can say the index is relative, and leave the clear pairs alone.
+func TestFillWholeNightAfterOnset(t *testing.T) {
+	res := fixture(t)
+	early := time.Date(2026, 9, 2, 23, 0, 0, 0, time.UTC) // before NGC 2070 starts at 23:53
+	base := Baselines(res.Frames, early, true)
+	for _, f := range []string{"H", "O", "S"} {
+		if _, ok := base[BaselineKey{"NGC 2070", f}]; ok {
+			t.Fatalf("NGC 2070/%s should have no pre-onset baseline", f)
+		}
+	}
+	ic := base[BaselineKey{"IC 4628", "H"}]
+
+	added := FillWholeNight(res.Frames, base)
+	if len(added) != 3 {
+		t.Fatalf("added %v, want the three NGC 2070 filters", added)
+	}
+	whole := Baselines(res.Frames, time.Time{}, false)
+	for _, k := range added {
+		if k.Target != "NGC 2070" {
+			t.Errorf("filled %v, which had clear frames", k)
+		}
+		b := base[k]
+		if b.Source != SourceWholeNight {
+			t.Errorf("%v source = %q, want %q", k, b.Source, SourceWholeNight)
+		}
+		if b.MedianStars != whole[k].MedianStars || b.NFrames != whole[k].NFrames {
+			t.Errorf("%v = %+v, want whole-night %+v", k, b, whole[k])
+		}
+		if _, ok := Index(ninalog.Frame{Target: k.Target, Filter: k.Filter, DetectedStars: 1}, base); !ok {
+			t.Errorf("%v still has no index", k)
+		}
+	}
+	if got := base[BaselineKey{"IC 4628", "H"}]; got != ic || got.Source != SourceSelf {
+		t.Errorf("IC 4628/H changed: %+v -> %+v", ic, got)
+	}
+	if FillWholeNight(res.Frames, base) != nil {
+		t.Error("second fill added pairs")
+	}
+}
+
 func TestIndexStats(t *testing.T) {
 	res := fixture(t)
 	base := Baselines(res.Frames, onset, true)

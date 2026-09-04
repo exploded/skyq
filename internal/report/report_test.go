@@ -105,6 +105,37 @@ func TestRenderFixtureNight(t *testing.T) {
 	}
 }
 
+// When a target has only a whole-night divisor the report must say so —
+// its index is relative, and a reader comparing nights needs to know.
+func TestRenderBaselineFallbackNote(t *testing.T) {
+	base := map[analysis.BaselineKey]analysis.Baseline{
+		{"IC 4628", "H"}:  {MedianStars: 332, NFrames: 8, Source: analysis.SourceSelf},
+		{"NGC 2070", "H"}: {MedianStars: 250, NFrames: 18, Source: analysis.SourceWholeNight},
+		{"NGC 2070", "O"}: {MedianStars: 228, NFrames: 12, Source: analysis.SourceHistorical},
+	}
+	at := time.Date(2026, 9, 3, 22, 0, 0, 0, time.UTC)
+	html, err := Render(Input{
+		NightOf:      "2026-09-03",
+		Frames:       []ninalog.Frame{{At: at, ExposureSec: 300, Filter: "H", Target: "IC 4628", DetectedStars: 330}},
+		Baselines:    base,
+		BaselineMode: "self",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, want := range []string{
+		"NGC 2070 had no clear frames tonight",
+		"<td>whole night, cloud included</td>",
+		"<td>earlier clear nights</td>",
+		"<td>tonight, clear frames</td>",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("report missing %q", want)
+		}
+	}
+}
+
 var reLumData = regexp.MustCompile(`"lum":\[((?:\[[\d.,-]+\],?)+)\]`)
 
 func referenceLumSeries(t *testing.T) []analysis.LumSample {
