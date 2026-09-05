@@ -81,10 +81,17 @@ Gating in sequences: use Sequencer Powerups weather expressions (e.g.
 
 ## Publishing
 
-With `publish.enabled: true`, the finished report and a regenerated index
-page are copied by `scp` (OpenSSH, `BatchMode`) to the Linode web root for
-deepspaceplace.com. A publish failure is logged but never blocks the local
-report. One-time setup on the machine that runs skyq:
+Every report carries previous/next-night links and a link back to
+`index.html`, which lists all nights by month with each verdict's opening
+line. Both are rebuilt after each run: neighbouring reports are relinked in
+place, and any that changed are uploaded along with the new report and the
+index. Reports rendered before navigation existed have no link slots — run
+`skyq backfill` to regenerate them.
+
+With `publish.enabled: true`, the finished report, the regenerated index
+and any relinked neighbours are copied by `scp` (OpenSSH, `BatchMode`) to
+the Linode web root for deepspaceplace.com. A publish failure is logged but
+never blocks the local report. One-time setup on the machine that runs skyq:
 
 1. `ssh-keygen -t ed25519 -f %USERPROFILE%\.ssh\skyq_publish -N "" -C skyq-publish`
    and set `publish.identity_file` to that private key path.

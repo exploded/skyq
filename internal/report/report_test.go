@@ -87,6 +87,7 @@ func TestRenderFixtureNight(t *testing.T) {
 		"var(--series-1)",
 		"post_slew",
 		`<style>`,
+		`<!--nav:top-->`, `<!--nav:bottom-->`, `href="index.html"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("report missing %q", want)

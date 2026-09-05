@@ -137,11 +137,25 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 	}
 	log.Printf("report written: %s (%d KB)", out, len(html)/1024)
 
+	// Point neighbouring nights at this one and rebuild the index. Both
+	// are local conveniences as well as what the server serves.
+	files := []string{out}
+	if changed, err := report.Relink(cfg.ReportsDir); err != nil {
+		log.Printf("relink: %v", err)
+	} else {
+		files = append(files, changed...)
+	}
+	if idx, err := report.WriteIndex(cfg.ReportsDir); err != nil {
+		log.Printf("index: %v", err)
+	} else {
+		files = append(files, idx)
+	}
+
 	// Publishing is a copy, not the product — failure is logged, not fatal.
-	if err := publish.Report(cfg.Publish, cfg.ReportsDir, out); err != nil {
+	if err := publish.Files(cfg.Publish, files...); err != nil {
 		log.Printf("publish FAILED (report is still available locally): %v", err)
 	} else if cfg.Publish.Enabled {
-		log.Printf("published to %s:%s", cfg.Publish.Host, cfg.Publish.Dest)
+		log.Printf("published %d files to %s:%s", len(files), cfg.Publish.Host, cfg.Publish.Dest)
 	}
 	return nil
 }

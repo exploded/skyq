@@ -198,3 +198,31 @@ th, td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var
 th { color: var(--muted); font-weight: 600 }
 
 .foot { color: var(--muted); font-size: 12px; margin-top: 26px; max-width: 76ch }
+
+/* ── night navigation ──────────────────────────────────────────────────── */
+
+/* Links between nights and back to the index. One row above the title and
+   one after the footnote; both are rewritten when neighbouring nights are
+   published, so they stay correct on the server and on disk. */
+.nights {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  font-size: 12.5px; color: var(--text-secondary); margin: 0 0 18px;
+}
+.nights.bottom { margin: 26px 0 0; padding-top: 12px; border-top: 1px solid var(--grid) }
+.nights a { color: var(--series-1); text-decoration: none; white-space: nowrap }
+.nights a:hover { text-decoration: underline }
+.nights .pn { display: flex; gap: 16px }
+.nights .off { color: var(--muted); white-space: nowrap }
+
+/* Index page: one row per night, grouped by month, newest first. */
+.night {
+  display: grid; grid-template-columns: 150px 1fr; gap: 4px 16px; align-items: baseline;
+  padding: 10px 0; border-top: 1px solid var(--grid);
+  color: inherit; text-decoration: none;
+}
+.night:first-child { border-top: 0 }
+.night time { color: var(--series-1); font-weight: 600; font-variant-numeric: tabular-nums }
+.night:hover time { text-decoration: underline }
+.night .sum { font-size: 12.5px; color: var(--text-secondary); max-width: 78ch }
+.night .pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px }
+@media (max-width: 560px) { .night { grid-template-columns: 1fr } }

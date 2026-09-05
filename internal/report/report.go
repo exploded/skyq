@@ -97,6 +97,8 @@ type pageData struct {
 	Foot             string
 	CSS              template.CSS
 	ChartsJSON       template.JS
+	NavTop           template.HTML // rewritten by Relink once neighbours exist
+	NavBottom        template.HTML
 }
 
 // Render produces the finished report HTML.
@@ -199,6 +201,8 @@ func Render(in Input) ([]byte, error) {
 			"Still capture times come from the AllSky filenames. All times are local.",
 		CSS:        template.CSS(reportCSS),
 		ChartsJSON: chartsJSON(origin, span, series, lumSeries),
+		NavTop:     template.HTML(navBlock("top", in.NightOf, "", "")),
+		NavBottom:  template.HTML(navBlock("bottom", in.NightOf, "", "")),
 	}
 
 	var buf bytes.Buffer
