@@ -98,7 +98,13 @@ never blocks the local report. One-time setup on the machine that runs skyq:
 2. Trust the host key once: `ssh-keyscan -p 2222 172.105.178.43 >> %USERPROFILE%\.ssh\known_hosts`
 3. On the Linode (root): append the `.pub` to `/home/deploy/.ssh/authorized_keys`,
    and create the target dir writable by deploy:
-   `mkdir -p /var/www/deepspaceplace/reports && chown deploy:www-data /var/www/deepspaceplace/reports`
+   `mkdir -p /var/www/deepspaceplace/reports && chown deploy:www-data /var/www/deepspaceplace/reports && chmod 2775 /var/www/deepspaceplace/reports`,
+   then `usermod -aG www-data deploy`. Only the *directory* need stay
+   writable: uploads land under a temporary name and are renamed over the
+   target, so `deploy` never has to own the file it replaces. That matters
+   because `deploy-deepspaceplace` ends with
+   `chown -R www-data:www-data /var/www/deepspaceplace`, which reclaims every
+   report each time the site ships — the setgid group bit survives it.
 4. Add a Caddy `handle_path`/root for `/reports` under the deepspaceplace.com
    site if the web root differs from `dest`, then `systemctl reload caddy`.
 
