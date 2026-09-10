@@ -34,6 +34,7 @@ cloud is not a safety condition, and unknown never means clear.</p>
 <div id="live" hx-get="/partial" hx-trigger="every 30s" hx-swap="outerMorph" style="min-height:520px">
 
 <div class="card">
+  {{if .NightLabel}}<p class="note">Night of {{.NightLabel}}{{if .RoofLabel}} &middot; {{.RoofLabel}}{{end}}</p>{{end}}
   <div class="state {{.StateClass}}">
     <span class="flag">{{.StateLabel}}</span>
     <span class="why">{{if .Reason}}{{.Reason}}{{else}}{{.Dark}}{{end}}</span>
@@ -48,22 +49,24 @@ cloud is not a safety condition, and unknown never means clear.</p>
 </div>
 
 {{if .HasChart}}<div class="card">
-  <h2>Tonight&#8217;s sky brightness</h2>
+  <h2>Sky brightness{{if .NightLabel}} &middot; night of {{.NightLabel}}{{end}}</h2>
+  {{if .ChartNote}}<p class="note">{{.ChartNote}}</p>{{end}}
   <div class="chartbox"><svg viewBox="0 0 940 210">{{.Chart}}</svg></div>
 </div>{{end}}
 
 {{if .HasStill}}<div class="card livestill">
   <h2>Latest all&#8209;sky still</h2>
+  {{if .StillAt}}<p class="note">Captured {{.StillAt}}{{if .StillAge}} &middot; {{.StillAge}}{{end}}</p>{{end}}
   <img src="{{.StillURL}}" alt="Latest all-sky still">
 </div>{{end}}
 
 {{if .Events}}<div class="card">
-  <h2>Tonight&#8217;s events</h2>
+  <h2>Events{{if .NightLabel}} &middot; night of {{.NightLabel}}{{end}}</h2>
   <div>
 {{range .Events}}    <div class="evrow"><time>{{.Time}}</time><span class="pill">{{.Kind}}</span><span>{{.Detail}}</span><span class="pill">{{.Cause}}</span></div>
 {{end}}  </div>
 </div>{{end}}
 
-<p class="updated">{{if .Weather}}{{.Weather}} &middot; {{end}}{{.FrameCount}} frames tonight &middot; updated {{.Generated}} &middot; refreshes every 30&#8202;s</p>
+<p class="updated">{{if .Weather}}{{.Weather}} &middot; {{end}}{{.FrameCount}} frames this night &middot; updated {{.Generated}} &middot; refreshes every 30&#8202;s</p>
 </div>
 {{end}}

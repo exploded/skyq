@@ -3,6 +3,7 @@ package live
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"math"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/exploded/skyq/internal/ninalog"
 )
 
 // writeStill drops a uniform-grey synthetic still into the cache dir with
@@ -39,7 +42,7 @@ type fixture struct {
 
 // newFixture builds an engine over a temp cache with a controllable clock
 // and a fixed dark window (19:00 → 05:30).
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, tweak ...func(*Options)) *fixture {
 	t.Helper()
 	f := &fixture{}
 	cache := t.TempDir()
@@ -49,7 +52,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	darkFrom := time.Date(2026, 9, 2, 19, 0, 0, 0, time.UTC)
 	darkTo := time.Date(2026, 9, 3, 5, 30, 0, 0, time.UTC)
-	f.engine = New(Options{
+	opt := Options{
 		CacheDir: cache, Loc: time.UTC,
 		Window: 5, Threshold: 6.0,
 		BandTop: 0.06, BandBottom: 0.30,
@@ -59,8 +62,36 @@ func newFixture(t *testing.T) *fixture {
 		DarkWindow: func(time.Time) (time.Time, time.Time, bool) {
 			return darkFrom, darkTo, true
 		},
-	})
+	}
+	for _, fn := range tweak {
+		fn(&opt)
+	}
+	f.engine = New(opt)
 	return f
+}
+
+// writeRoofLog drops a minimal N.I.N.A. log holding one roof move into a
+// temp dir and points the engine at it.
+func writeRoofLog(t *testing.T, o *Options, start, end time.Time, opening bool) {
+	t.Helper()
+	dir := t.TempDir()
+	// N.I.N.A. logs "CloseShutter"/"OpenShutter" as the method, with its own
+	// tense in the message and the shutter state on each side of the move.
+	method, verb, past, prep, from, to := "Close", "Closing", "Closed", "closing", "Open", "Closed"
+	if opening {
+		method, verb, past, prep, from, to = "Open", "Opening", "Opened", "opening", "Closed", "Open"
+	}
+	body := fmt.Sprintf(
+		"%s|INFO|DomeVM.cs|%sShutter|544|%s dome shutter. Shutter state before %s Shutter%s\n"+
+			"%s|INFO|DomeVM.cs|%sShutter|550|%s dome shutter. Shutter state after %s Shutter%s\n",
+		start.Format("2006-01-02T15:04:05.000"), method, verb, prep, from,
+		end.Format("2006-01-02T15:04:05.000"), method, past, prep, to)
+	name := "20260902-190000-3.2.0.9001.1-202609.log"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.NINALogDir = dir
+	o.RoofSettle = time.Minute
 }
 
 func TestStartupIsUnknown(t *testing.T) {
@@ -150,5 +181,90 @@ func TestDarkWindowMelbourne(t *testing.T) {
 	}
 	if !to.After(from) || to.Sub(from) > 16*time.Hour {
 		t.Errorf("implausible dark window %s → %s", from, to)
+	}
+}
+
+// The failure that motivated the roof gate: the underside of a shut roof is
+// almost perfectly constant, so a closed roof scores near-zero volatility
+// and would otherwise publish CLEAR over Alpaca while the observatory is
+// buttoned up.
+func TestRoofClosedIsNeverClear(t *testing.T) {
+	closeStart := time.Date(2026, 9, 2, 20, 55, 0, 0, time.UTC)
+	f := newFixture(t, func(o *Options) {
+		writeRoofLog(t, o, closeStart, closeStart.Add(30*time.Second), false)
+	})
+	base := time.Date(2026, 9, 2, 21, 0, 0, 0, time.UTC)
+	// Flat and dark — exactly what a shut roof looks like.
+	for i := 0; i < 8; i++ {
+		writeStill(t, f.dir, base.Add(time.Duration(i)*time.Minute), 6)
+	}
+	f.now = base.Add(8 * time.Minute)
+	f.engine.PollOnce(context.Background())
+
+	s := f.engine.Snapshot()
+	if s.Cloud != StateUnknown {
+		t.Errorf("roof shut: state=%s vol=%.2f, want unknown", s.Cloud, s.Volatility)
+	}
+	if !strings.Contains(s.Reason, "roof") {
+		t.Errorf("reason = %q, want it to name the roof", s.Reason)
+	}
+	if s.RoofExcluded != 8 {
+		t.Errorf("excluded %d samples, want all 8", s.RoofExcluded)
+	}
+}
+
+// Opening the roof is a bigger luminance step than any cloud. Dropping the
+// shut-roof samples keeps that step out of the trailing window, so arriving
+// at the observatory doesn't fabricate a cloud onset.
+func TestRoofOpeningIsNotCloud(t *testing.T) {
+	openStart := time.Date(2026, 9, 2, 21, 6, 0, 0, time.UTC)
+	f := newFixture(t, func(o *Options) {
+		writeRoofLog(t, o, openStart, openStart.Add(30*time.Second), true)
+	})
+	base := time.Date(2026, 9, 2, 21, 0, 0, 0, time.UTC)
+	// Six minutes of shut roof, then the step, then flat sky.
+	for i := 0; i < 6; i++ {
+		writeStill(t, f.dir, base.Add(time.Duration(i)*time.Minute), 6)
+	}
+	for i := 8; i < 16; i++ {
+		writeStill(t, f.dir, base.Add(time.Duration(i)*time.Minute), 34)
+	}
+	f.now = base.Add(16 * time.Minute)
+	f.engine.PollOnce(context.Background())
+
+	s := f.engine.Snapshot()
+	if s.Cloud == StateCloudy {
+		t.Errorf("the roof opening read as cloud: vol=%.2f threshold=%.1f", s.Volatility, s.Threshold)
+	}
+	if s.Roof != ninalog.RoofOpen {
+		t.Errorf("roof = %s, want open", s.Roof)
+	}
+	if s.RoofExcluded != 6 {
+		t.Errorf("excluded %d samples, want the 6 taken with the roof shut", s.RoofExcluded)
+	}
+}
+
+// A night the log says nothing about must behave exactly as it did before
+// the gate existed. N.I.N.A. never sees a roof opened by hand, so unknown
+// can't be allowed to mean shut.
+func TestRoofUnknownStillReportsCloud(t *testing.T) {
+	f := newFixture(t)
+	base := time.Date(2026, 9, 2, 21, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		level := uint8(28)
+		if i%2 == 0 {
+			level = 90
+		}
+		writeStill(t, f.dir, base.Add(time.Duration(i)*time.Minute), level)
+	}
+	f.now = base.Add(12 * time.Minute)
+	f.engine.PollOnce(context.Background())
+
+	s := f.engine.Snapshot()
+	if s.Cloud != StateCloudy {
+		t.Errorf("no roof history: state=%s reason=%q, want cloudy as before", s.Cloud, s.Reason)
+	}
+	if s.RoofExcluded != 0 {
+		t.Errorf("excluded %d samples with no roof history, want 0", s.RoofExcluded)
 	}
 }

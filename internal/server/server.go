@@ -17,6 +17,7 @@ import (
 
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/live"
+	"github.com/exploded/skyq/internal/ninalog"
 	"github.com/exploded/skyq/internal/owm"
 	"github.com/exploded/skyq/internal/report"
 )
@@ -93,6 +94,8 @@ type eventRow struct {
 
 type viewData struct {
 	CSS        template.CSS
+	NightLabel string
+	RoofLabel  string
 	StateLabel string
 	StateClass string // ok | bad | unknown
 	Reason     string
@@ -102,9 +105,11 @@ type viewData struct {
 	Lum        string
 	Index      string
 	StillAge   string
+	StillAt    string
 	StillURL   string
 	HasStill   bool
 	Chart      template.HTML
+	ChartNote  string
 	HasChart   bool
 	Events     []eventRow
 	FrameCount int
@@ -118,7 +123,20 @@ func (s *Server) render(w http.ResponseWriter, name string) {
 		CSS:       template.CSS(report.CSS()),
 		Reason:    snap.Reason,
 		Threshold: fmt.Sprintf("%.1f", snap.Threshold),
-		Generated: snap.At.In(s.loc).Format("15:04:05"),
+		Generated: snap.At.In(s.loc).Format("2 Jan 15:04:05"),
+	}
+	if !snap.Night.IsZero() {
+		d.NightLabel = report.NightLabel(snap.Night.Format("2006-01-02"))
+	}
+	// Roof state is context, not a measurement: N.I.N.A. only logs the moves
+	// it commanded, so most nights it is simply unknown and says nothing.
+	switch snap.Roof {
+	case ninalog.RoofOpen:
+		d.RoofLabel = "roof open"
+	case ninalog.RoofClosed:
+		d.RoofLabel = "roof closed"
+	case ninalog.RoofMoving:
+		d.RoofLabel = "roof moving"
 	}
 	switch snap.Cloud {
 	case live.StateClear:
@@ -150,6 +168,7 @@ func (s *Server) render(w http.ResponseWriter, name string) {
 	}
 	if !snap.LastStillAt.IsZero() {
 		d.StillAge = fmt.Sprintf("%.0fs ago", time.Since(snap.LastStillAt).Seconds())
+		d.StillAt = snap.LastStillAt.In(s.loc).Format("2 Jan 15:04:05")
 		d.HasStill = snap.LastStill != ""
 		d.StillURL = fmt.Sprintf("/still/latest?t=%d", snap.LastStillAt.Unix())
 	}
@@ -164,6 +183,17 @@ func (s *Server) render(w http.ResponseWriter, name string) {
 	if len(snap.Samples) >= 2 {
 		d.Chart = template.HTML(lumChart(snap.Samples))
 		d.HasChart = true
+		// The all-sky box captures all night whether or not skyq is
+		// running, so a fresh start fills the chart back to dusk. Say
+		// how many stills and what span, or that looks like stale data.
+		first := snap.Samples[0].At.In(s.loc)
+		last := snap.Samples[len(snap.Samples)-1].At.In(s.loc)
+		d.ChartNote = fmt.Sprintf("%d stills from the all-sky camera, %s–%s on %s. It records all night, so the chart fills back to dusk even when skyq starts late.",
+			len(snap.Samples), first.Format("15:04"), last.Format("15:04"), first.Format("2 Jan"))
+		if snap.RoofExcluded > 0 {
+			d.ChartNote += fmt.Sprintf(" %d of them were taken with the roof shut — the camera is inside the observatory, so those measure the roof, not the sky, and are left out of the verdict.",
+				snap.RoofExcluded)
+		}
 	}
 	if s.Weather != nil {
 		if cur, err := s.Weather.Current(); err == nil {

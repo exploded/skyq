@@ -48,8 +48,12 @@ type Options struct {
 	MaxStillAge time.Duration
 	Poll        time.Duration
 
-	// NINALogDir enables the live index and event list when non-empty.
+	// NINALogDir enables the live index, event list and roof gate when
+	// non-empty.
 	NINALogDir string
+	// RoofSettle is how long after the roof stops moving the camera still
+	// isn't measuring sky. Zero uses analysis.DefaultRoofSettle.
+	RoofSettle time.Duration
 	// Baselines supplies stored (target, filter) baselines for the live
 	// index; called at most every 15 minutes. May be nil.
 	Baselines func() map[analysis.BaselineKey]analysis.Baseline
@@ -62,6 +66,10 @@ type Options struct {
 // Snapshot is what the Alpaca device and the live page read.
 type Snapshot struct {
 	At time.Time
+	// Night is the evening date this data belongs to (the all-sky
+	// directory rolls at local noon), so the page can say which night
+	// it is showing rather than just "tonight".
+	Night time.Time
 
 	Cloud      State
 	Reason     string  // why unknown; empty for clear/cloudy
@@ -76,6 +84,14 @@ type Snapshot struct {
 	Dark     bool
 	DarkFrom time.Time
 	DarkTo   time.Time
+
+	// The all-sky camera is inside the observatory, so a shut roof is not a
+	// sky measurement. Roof is what tonight's log says right now; RoofSpans
+	// is the night's known history; RoofExcluded counts the stills dropped
+	// from the verdict because the camera was looking at the roof.
+	Roof         ninalog.RoofState
+	RoofSpans    []analysis.RoofSpan
+	RoofExcluded int
 
 	Samples []analysis.LumSample // tonight's, for the sparkline
 
@@ -95,12 +111,12 @@ type Engine struct {
 	mu   sync.RWMutex
 	snap Snapshot
 
-	night        string // current YYYYMMDD stills dir
-	samples      []analysis.LumSample
-	seen         map[string]bool
-	baselines    map[analysis.BaselineKey]analysis.Baseline
-	baselinesAt  time.Time
-	refresh      chan struct{}
+	night       string // current YYYYMMDD stills dir
+	samples     []analysis.LumSample
+	seen        map[string]bool
+	baselines   map[analysis.BaselineKey]analysis.Baseline
+	baselinesAt time.Time
+	refresh     chan struct{}
 }
 
 func New(opt Options) *Engine {
@@ -188,14 +204,25 @@ func (e *Engine) poll(ctx context.Context) {
 
 	darkFrom, darkTo, darkOK := e.opt.DarkWindow(evening)
 
+	// Parsed before the verdict, not after it: the log carries the roof
+	// history, and a sample taken with the roof shut must never reach the
+	// volatility window. Parsing outside the lock keeps readers unblocked.
+	res := e.parseNight(evening)
+	nightStart := time.Date(evening.Year(), evening.Month(), evening.Day(), 12, 0, 0, 0, e.opt.Loc)
+	var roof analysis.RoofTimeline
+	if res != nil {
+		roof = analysis.NewRoofTimeline(res.RoofMoves, nightStart, nightStart.Add(24*time.Hour))
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s := Snapshot{
-		At:        now,
-		Threshold: e.opt.Threshold,
-		DarkFrom:  darkFrom,
-		DarkTo:    darkTo,
-		Samples:   append([]analysis.LumSample(nil), e.samples...),
+		At:         now,
+		Night:      time.Date(evening.Year(), evening.Month(), evening.Day(), 0, 0, 0, 0, e.opt.Loc),
+		Threshold:  e.opt.Threshold,
+		DarkFrom:   darkFrom,
+		DarkTo:     darkTo,
+		Samples:    append([]analysis.LumSample(nil), e.samples...),
 		Volatility: math.NaN(),
 		Luminance:  math.NaN(),
 		Index:      math.NaN(),
@@ -207,6 +234,8 @@ func (e *Engine) poll(ctx context.Context) {
 	}
 	s.Stale = s.LastStillAt.IsZero() || now.Sub(s.LastStillAt) > e.opt.MaxStillAge
 	s.Dark = darkOK && !now.Before(darkFrom) && now.Before(darkTo)
+	s.Roof = roof.StateAt(now)
+	s.RoofSpans = roof.Spans()
 
 	// Cloud volatility only counts samples taken in darkness, so the
 	// twilight luminance ramp can't fake a cloud right after dark.
@@ -218,8 +247,13 @@ func (e *Engine) poll(ctx context.Context) {
 			}
 		}
 	}
-	if len(darkSamples) >= e.opt.Window {
-		vol := analysis.VolatilitySeries(darkSamples, e.opt.Window)
+	// Drop what the camera took of the roof rather than the sky. Removing
+	// the samples (rather than muting the verdict over them) keeps the
+	// open/close luminance step out of the trailing window altogether.
+	skySamples := roof.VisibleSamples(darkSamples, e.roofSettle())
+	s.RoofExcluded = len(e.samples) - len(roof.VisibleSamples(e.samples, e.roofSettle()))
+	if len(skySamples) >= e.opt.Window {
+		vol := analysis.VolatilitySeries(skySamples, e.opt.Window)
 		s.Volatility = vol[len(vol)-1]
 	}
 
@@ -227,6 +261,12 @@ func (e *Engine) poll(ctx context.Context) {
 	case s.Stale:
 		s.Cloud = StateUnknown
 		s.Reason = "no recent still from the all-sky camera"
+	case s.Roof == ninalog.RoofClosed:
+		s.Cloud = StateUnknown
+		s.Reason = "roof closed — the all-sky camera is inside the observatory"
+	case s.Roof == ninalog.RoofMoving:
+		s.Cloud = StateUnknown
+		s.Reason = "roof moving"
 	case !darkOK:
 		s.Cloud = StateUnknown
 		s.Reason = "no darkness window tonight"
@@ -235,14 +275,14 @@ func (e *Engine) poll(ctx context.Context) {
 		s.Reason = fmt.Sprintf("waiting for darkness (%s–%s)", darkFrom.Format("15:04"), darkTo.Format("15:04"))
 	case math.IsNaN(s.Volatility):
 		s.Cloud = StateUnknown
-		s.Reason = fmt.Sprintf("warming up (%d of %d dark samples)", len(darkSamples), e.opt.Window)
+		s.Reason = fmt.Sprintf("warming up (%d of %d sky samples)", len(skySamples), e.opt.Window)
 	case s.Volatility > e.opt.Threshold:
 		s.Cloud = StateCloudy
 	default:
 		s.Cloud = StateClear
 	}
 
-	e.tailLog(&s, evening, now, darkFrom, darkOK)
+	e.tailLog(&s, res, roof, now, darkFrom, darkOK)
 	e.snap = s
 }
 
@@ -286,23 +326,43 @@ func (e *Engine) lastStillPath() string {
 }
 
 // tailLog re-parses tonight's N.I.N.A. log for the live index and events.
-func (e *Engine) tailLog(s *Snapshot, evening, now, darkFrom time.Time, darkOK bool) {
+// parseNight parses tonight's N.I.N.A. logs, or returns nil when there is no
+// log directory configured, nothing to read, or the parse failed. Every
+// caller must treat nil as "the log knows nothing" rather than as an error.
+func (e *Engine) parseNight(evening time.Time) *ninalog.Result {
 	if e.opt.NINALogDir == "" {
-		return
+		return nil
 	}
 	nightStart := time.Date(evening.Year(), evening.Month(), evening.Day(), 12, 0, 0, 0, e.opt.Loc)
 	logs, err := ninalog.FindNightLogs(e.opt.NINALogDir, nightStart, nightStart.Add(24*time.Hour), e.opt.Loc)
 	if err != nil || len(logs) == 0 {
-		return
+		return nil
 	}
 	res, _, err := ninalog.ParseFiles(logs, e.opt.Loc)
 	if err != nil {
 		log.Printf("live: parsing tonight's log: %v", err)
+		return nil
+	}
+	return res
+}
+
+func (e *Engine) roofSettle() time.Duration {
+	if e.opt.RoofSettle > 0 {
+		return e.opt.RoofSettle
+	}
+	return analysis.DefaultRoofSettle
+}
+
+// tailLog fills in the live index and event list from tonight's already
+// parsed log.
+func (e *Engine) tailLog(s *Snapshot, res *ninalog.Result, roof analysis.RoofTimeline, now, darkFrom time.Time, darkOK bool) {
+	if res == nil {
 		return
 	}
 	s.Frames = res.Frames
 
-	onset, hasOnset := analysis.DetectOnset(darkSamplesOnly(s.Samples, darkFrom, darkOK), e.opt.Window, e.opt.Threshold)
+	sky := roof.VisibleSamples(darkSamplesOnly(s.Samples, darkFrom, darkOK), e.roofSettle())
+	onset, hasOnset := analysis.DetectOnset(sky, e.opt.Window, e.opt.Threshold)
 	s.Events = analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, hasOnset)
 
 	// Live index: median index of the last few light frames against known

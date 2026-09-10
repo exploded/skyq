@@ -67,6 +67,20 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		}
 	}
 	samples, stills := skySamples(cfg, loc, night, sampleStart, sampleEnd)
+
+	// The all-sky camera is inside the observatory: with the roof shut it
+	// measures the roof, near-constant and dark. Those stills must not reach
+	// the volatility window, or a dawn close reads as a cloud onset and a
+	// mid-night close reads as the clearest hours of the night. The log only
+	// records roof moves N.I.N.A. commanded, so nights it says nothing about
+	// are analysed exactly as before (SPEC §4.4).
+	roof := analysis.NewRoofTimeline(res.RoofMoves, windowStart, windowEnd)
+	roofNote := ""
+	if shut := len(samples) - len(roof.VisibleSamples(samples, analysis.DefaultRoofSettle)); shut > 0 {
+		log.Printf("roof shut or moving for %d of %d stills — excluded from cloud detection", shut, len(samples))
+		roofNote = roofShutNote(roof, sampleStart, sampleEnd, shut)
+		samples = roof.VisibleSamples(samples, analysis.DefaultRoofSettle)
+	}
 	onset, hasOnset := analysis.DetectOnset(samples, cfg.VolatilityWindow, cfg.VolatilityThreshold)
 	if hasOnset {
 		log.Printf("cloud onset %s (volatility > %.1f)", onset.Format("15:04"), cfg.VolatilityThreshold)
@@ -124,6 +138,7 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		Baselines: baselines, BaselineMode: mode,
 		Stills: stills, Untrustworthy: untrust,
 		Flats: res.Flats, FlatExposures: res.FlatExposures, FlatsUnstableSky: flatsUnstable,
+		RoofNote: roofNote,
 	})
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
@@ -411,4 +426,29 @@ func runCalibrate(cfg *config.Config, loc *time.Location, night string) error {
 	fmt.Printf("suggested threshold for a KNOWN CLEAR night: %.1f (max × 1.5)\n", max*1.5)
 	fmt.Println("only calibrate against a night you know was clear end to end.")
 	return nil
+}
+
+// roofShutNote describes the gaps the roof gate leaves in the luminance
+// chart. Without it a reader sees a hole in the night and assumes the
+// camera failed.
+func roofShutNote(roof analysis.RoofTimeline, from, to time.Time, excluded int) string {
+	var spans []string
+	for _, sp := range roof.Spans() {
+		if sp.State != ninalog.RoofClosed || !sp.To.After(from) || !sp.From.Before(to) {
+			continue
+		}
+		start, end := sp.From, sp.To
+		if start.Before(from) {
+			start = from
+		}
+		if end.After(to) {
+			end = to
+		}
+		spans = append(spans, fmt.Sprintf("%s–%s", start.Format("15:04"), end.Format("15:04")))
+	}
+	if len(spans) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Roof shut %s. The all-sky camera is inside the observatory, so those %d stills measured the roof, not the sky, and are left out of this chart and the cloud detection.",
+		strings.Join(spans, ", "), excluded)
 }

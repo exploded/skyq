@@ -42,6 +42,12 @@ at 09:00. No settings UI — config.json (gitignored, secrets) + CLI only.
   line appears.
 - **Only completed autofocus runs exclude frames.** Frames of cancelled AF
   runs are the validated "centering" class (§9's 18) — do not "fix" this.
+- **The all-sky camera is inside the observatory.** With the roof shut it
+  photographs the roof — flat and dark, which scores near-zero volatility and
+  would read as the clearest sky of the night. Roof state comes from the
+  N.I.N.A. log (`DomeVM.cs` shutter lines) and gates the luminance series
+  (SPEC §4.4). N.I.N.A. never sees a roof opened by hand, so **unknown must
+  keep behaving exactly as it did before the gate** — never as closed.
 - **Two median conventions on purpose**: baselines use median_high; index
   stats use Python-statistics median + exclusive (R-6) quartiles. §9 breaks
   otherwise.

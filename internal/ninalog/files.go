@@ -64,9 +64,11 @@ func ParseFiles(paths []string, loc *time.Location) (*Result, string, error) {
 		merged.SolveSuccesses += r.SolveSuccesses
 		merged.Flats = append(merged.Flats, r.Flats...)
 		merged.FlatExposures = append(merged.FlatExposures, r.FlatExposures...)
+		merged.RoofMoves = append(merged.RoofMoves, r.RoofMoves...)
 	}
 	sort.Slice(merged.Frames, func(i, j int) bool { return merged.Frames[i].At.Before(merged.Frames[j].At) })
 	sort.Slice(merged.Events, func(i, j int) bool { return merged.Events[i].At.Before(merged.Events[j].At) })
 	sort.Slice(merged.Flats, func(i, j int) bool { return merged.Flats[i].At.Before(merged.Flats[j].At) })
+	sort.Slice(merged.RoofMoves, func(i, j int) bool { return merged.RoofMoves[i].Start.Before(merged.RoofMoves[j].Start) })
 	return merged, hex.EncodeToString(h.Sum(nil)), nil
 }

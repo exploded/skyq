@@ -65,6 +65,13 @@ var (
 	reSolveFail  = regexp.MustCompile(`^(\S+)\|\w+\|ASTAPSolver\.cs\|ReadResult\|\d+\|ASTAP - Plate solve failed`)
 	rePHD2Err    = regexp.MustCompile(`^(\S+)\|\w+\|PHD2Guider\.cs\|ProcessEvent\|\d+\|PHD2 error:(.*)$`)
 	reDomeRefuse = regexp.MustCompile(`^(\S+)\|\w+\|DomeVM\.cs\|OpenShutter\|\d+\|Dome shutter ordered to open but the mount is unparked`)
+
+	// Roof movement. The all-sky camera is inside the observatory, so a shut
+	// roof is not a sky measurement (SPEC §4.4). These two lines bracket every
+	// move N.I.N.A. commands, and each states the shutter state on its own side
+	// of the move — the only roof history the log carries.
+	reShutterStart = regexp.MustCompile(`^(\S+)\|INFO\|DomeVM\.cs\|(?:Open|Close)Shutter\|\d+\|(?:Opening|Closing) dome shutter\. Shutter state before (?:opening|closing) Shutter(\w+)`)
+	reShutterEnd   = regexp.MustCompile(`^(\S+)\|INFO\|DomeVM\.cs\|(?:Open|Close)Shutter\|\d+\|(?:Opened|Closed) dome shutter\. Shutter state after (?:opening|closing) Shutter(\w+)`)
 )
 
 // Parse streams one night's log. loc is the observatory's time zone; the log
@@ -86,7 +93,18 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 		// A flat exposure search that never logs "Found exposure time"
 		// before the next search (or EOF) failed to converge.
 		openFlatSearch *time.Time
+
+		// The roof move whose start line we have seen but whose finish line we
+		// have not. A move left open at EOF stalled or outlived the log; it
+		// keeps a zero End so the timeline can treat it as "moving from here".
+		openRoofMove *RoofMove
 	)
+	flushRoofMove := func() {
+		if openRoofMove != nil {
+			res.RoofMoves = append(res.RoofMoves, *openRoofMove)
+			openRoofMove = nil
+		}
+	}
 	failOpenFlatSearch := func() {
 		if openFlatSearch != nil {
 			res.Events = append(res.Events, Event{At: *openFlatSearch, Kind: FlatsFailed,
@@ -250,6 +268,30 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 			res.Events = append(res.Events, Event{At: at, Kind: PHD2Error, Detail: m[2]})
 			continue
 		}
+		if m := reShutterStart.FindStringSubmatch(line); m != nil {
+			at, err := parseTS(m[1], loc, lineNo)
+			if err != nil {
+				return nil, err
+			}
+			flushRoofMove()
+			openRoofMove = &RoofMove{Start: at, From: roofState(m[2])}
+			continue
+		}
+		if m := reShutterEnd.FindStringSubmatch(line); m != nil {
+			at, err := parseTS(m[1], loc, lineNo)
+			if err != nil {
+				return nil, err
+			}
+			if openRoofMove == nil {
+				// A finish with no start: the log rolled over mid-move. The
+				// resulting state still stands from here on.
+				openRoofMove = &RoofMove{Start: at}
+			}
+			openRoofMove.End = at
+			openRoofMove.To = roofState(m[2])
+			flushRoofMove()
+			continue
+		}
 		if m := reDomeRefuse.FindStringSubmatch(line); m != nil {
 			at, err := parseTS(m[1], loc, lineNo)
 			if err != nil {
@@ -264,7 +306,24 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 		return nil, fmt.Errorf("reading log: %w", err)
 	}
 	failOpenFlatSearch()
+	flushRoofMove()
 	return res, nil
+}
+
+// roofState maps the shutter word N.I.N.A. prints ("ShutterOpen",
+// "ShutterClosed", "ShutterOpening", ...) onto a RoofState. Anything else,
+// including the driver's error state, is unknown: the gate must never infer
+// "closed" from a word it does not recognise.
+func roofState(word string) RoofState {
+	switch word {
+	case "Open":
+		return RoofOpen
+	case "Closed":
+		return RoofClosed
+	case "Opening", "Closing":
+		return RoofMoving
+	}
+	return RoofUnknown
 }
 
 func parseTS(s string, loc *time.Location, lineNo int) (time.Time, error) {

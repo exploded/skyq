@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/exploded/skyq/internal/live"
+	"github.com/exploded/skyq/internal/ninalog"
 	"github.com/exploded/skyq/internal/owm"
 )
 
@@ -123,9 +124,16 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request) {
 			s.reply(w, r, math.Min(100, 100*snap.Volatility/snap.Threshold), 0, "")
 		}
 	case "skybrightness":
-		if snap.Stale || math.IsNaN(snap.Luminance) {
+		// A shut roof is not sky. The camera is inside the observatory, so
+		// with the roof over it this number measures the roof — report it
+		// unavailable rather than passing off a roof reading as sky.
+		roofOver := snap.Roof == ninalog.RoofClosed || snap.Roof == ninalog.RoofMoving
+		switch {
+		case snap.Stale || math.IsNaN(snap.Luminance):
 			s.reply(w, r, nil, errValueNotSet, "sky brightness unavailable: no recent still")
-		} else {
+		case roofOver:
+			s.reply(w, r, nil, errValueNotSet, "sky brightness unavailable: "+string(snap.Roof)+" roof over the all-sky camera")
+		default:
 			// Instrumental units (mean luminance 0–255 of an auto-exposed
 			// camera), NOT lux — documented in sensordescription.
 			s.reply(w, r, snap.Luminance, 0, "")

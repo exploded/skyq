@@ -35,7 +35,7 @@ from the start, not as a `main.go` monolith.
 | **Language** | Go |
 | **Storage** | SQLite via modernc/sqlite (pure Go, no cgo), queries via [sqlc](https://sqlc.dev/) |
 | **Web** | `html/template` + HTMX (self-hosted, no CDN) |
-| **All-sky stills** | On `allsky.local` (Debian box running AllSky), `~/allsky/images/YYYYMMDD/image-YYYYMMDDHHMMSS.jpg` — skyq pulls them over the LAN and caches locally |
+| **All-sky stills** | On `allsky.local` (Debian box running AllSky), `~/allsky/images/YYYYMMDD/image-YYYYMMDDHHMMSS.jpg` — skyq pulls them over the LAN and caches locally. **The camera is inside the observatory**, under the roll-off roof: with the roof shut it measures the roof (§4.4) |
 | **N.I.N.A. log** | Local file, `%LOCALAPPDATA%\NINA\Logs\` — open read-only |
 | **Service mgmt** | Windows Task Scheduler: daily task at 09:00 for `skyq report`, at-startup task with restart-on-failure for `skyq serve` |
 | **Publishing** | Finished reports pushed to the Linode, served at deepspaceplace.com (already behind Caddy) |
@@ -273,6 +273,37 @@ Phase 2.
 Absolute level is also useful context but is dominated by the moon: on the validated night
 the baseline was 25–30, rising gently to ~34 with moonrise, then spiking to a peak of 88.9
 at 05:19 under moonlit cloud.
+
+**The roof gate.** The all-sky camera is inside the observatory, so a still taken with the
+roof shut is a picture of the roof. Both directions of that are wrong, and the first is
+dangerous:
+
+- The underside of a shut roof is almost perfectly constant, so it scores near-zero
+  volatility and reads as the clearest sky of the night.
+- A roof opening or closing is a far bigger luminance step than any cloud, and it sits in
+  the trailing window for the next ten samples.
+
+So samples taken while the roof is known shut or moving, plus a settle window after a move
+(default 5 min — the roof edge leaving the frame, and the lights still on inside), are
+dropped from the series before volatility is computed. Dropping the samples rather than
+muting the verdict over them is deliberate: it keeps the step out of the window entirely.
+
+Roof state comes from the N.I.N.A. log — `DomeVM.cs` `OpenShutter`/`CloseShutter` bracket
+every move and each line states the shutter state on its own side of it. **That record is
+incomplete by construction**: N.I.N.A. logs only the moves it commanded, so a roof opened by
+hand from the controller's web page is invisible. The validated night of 2026-09-02/03 has
+no open event at all — only "Shutter state before closing ShutterOpen" at 06:36, which is
+what proves the night was open. Hence two rules:
+
+1. Each move's prior state carries **backwards** to the last known change and its resulting
+   state **forwards** to the next one, so a morning close describes the night behind it.
+2. **Unknown is not closed.** A night the log says nothing about is analysed exactly as it
+   was before the gate existed. Absence of a log line must never blank real sky (§8 rule 3).
+
+The gate changes nothing on the validated night — the roof was open throughout, so §9 holds
+unchanged. On 2026-08-31/09-01, where the roof shut at 01:20 and reopened at 05:04, it
+excludes 659 of 2032 stills and leaves the 01:12 onset (eight minutes before the roof shut)
+where it was.
 
 ### 4.5 Event attribution
 

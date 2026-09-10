@@ -109,8 +109,35 @@ type Result struct {
 	SolveSuccesses int
 	Flats          []FlatFrame
 	FlatExposures  []float64 // auto-exposure times the flat wizard settled on
+	RoofMoves      []RoofMove
 }
 
 // CompletedAFRuns is len(Result.AFRuns) by construction; kept as a method
 // so callers don't depend on that detail.
 func (r *Result) CompletedAFRuns() int { return len(r.AFRuns) }
+
+// RoofState is what the log says the roll-off roof was doing.
+type RoofState string
+
+const (
+	RoofUnknown RoofState = "unknown"
+	RoofOpen    RoofState = "open"
+	RoofClosed  RoofState = "closed"
+	RoofMoving  RoofState = "moving"
+)
+
+// RoofMove is one roof movement N.I.N.A. commanded, with the states the log
+// asserts on either side of it. End is zero if the log never recorded the
+// move finishing (a stall, or the log ended mid-move).
+//
+// N.I.N.A. only logs roof moves it issued itself. A roof opened by hand from
+// the controller's own web page leaves no trace at all: on the validated
+// night of 2026-09-02/03 there is no open event, only "Shutter state before
+// closing ShutterOpen" at 06:36 — which is why From matters as much as To.
+// Absence of a move is not evidence the roof was shut.
+type RoofMove struct {
+	Start time.Time // "Opening/Closing dome shutter"
+	End   time.Time // "Opened/Closed dome shutter"; zero if never logged
+	From  RoofState // state the log asserts held before Start
+	To    RoofState // state the log asserts held after End
+}

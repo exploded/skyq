@@ -47,6 +47,10 @@ type Input struct {
 	Stills        []allsky.Still
 	Untrustworthy []ninalog.AFRun
 
+	// RoofNote explains any stretch missing from the luminance chart because
+	// the roof was shut over it. Empty when the log recorded no roof moves.
+	RoofNote string
+
 	Flats            []ninalog.FlatFrame
 	FlatExposures    []float64
 	FlatsUnstableSky bool // all-sky volatility crossed the threshold during flats
@@ -86,6 +90,7 @@ type pageData struct {
 	MultiTarget      bool
 	BaselineModeNote string
 	BaselineFallback string // set when some pair had no clear frames tonight
+	RoofNote         string // set when the roof gate left a gap in the chart
 	HasOnset         bool
 	OnsetHM          string
 	Shots            []shot
@@ -179,7 +184,7 @@ func Render(in Input) ([]byte, error) {
 	verdict, stats, eventNote := narrate(in)
 
 	data := pageData{
-		Title:            "Sky transparency — night of " + nightLabel(in.NightOf),
+		Title:            "Sky transparency — night of " + NightLabel(in.NightOf),
 		Verdict:          template.HTML(verdict),
 		Stats:            stats,
 		Legend:           legend,
@@ -192,6 +197,7 @@ func Render(in Input) ([]byte, error) {
 		Shots:            pickShots(in),
 		Baselines:        baselineRows(in.Baselines),
 		BaselineFallback: baselineFallbackNote(in.Baselines),
+		RoofNote:         in.RoofNote,
 		Events:           eventRows(in.Events),
 		EventNote:        eventNote,
 		Frames:           frameRows(in),
@@ -255,7 +261,10 @@ func lumYMax(pts []Pt) float64 {
 	return math.Max(40, math.Ceil(max/20)*20)
 }
 
-func nightLabel(nightOf string) string {
+// NightLabel renders a night as the report titles it — "10–11 September
+// 2026" — from a YYYY-MM-DD evening date. The live page uses it too so
+// both surfaces name a night the same way.
+func NightLabel(nightOf string) string {
 	t, err := time.Parse("2006-01-02", nightOf)
 	if err != nil {
 		return nightOf
