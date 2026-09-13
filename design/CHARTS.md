@@ -19,9 +19,13 @@ is measurably harder to read.
    stacked charts sharing an x-axis. The transparency index and the all-sky luminance are two
    charts for exactly this reason.
 2. **Series colours are assigned in fixed slot order and never cycled.** H α = `--series-1`,
-   O III = `--series-2`, S II = `--series-3`. That order and those hexes passed colour-blind
-   separation and contrast checks in both light and dark. Do not substitute, reorder, or add a
-   fourth generated hue.
+   O III = `--series-2`, S II = `--series-3`, L = `--series-4`, R = `--series-5`,
+   G = `--series-6`, B = `--series-7`. Any filter outside that list folds into one "other"
+   series on `--series-8` — never a generated hue. The slots are the first eight of the
+   dataviz reference palette; the order passed colour-blind separation and contrast checks
+   for adjacent pairs in both light and dark, and the LRGB four pass all-pairs. Do not
+   substitute, reorder, or add a ninth hue. Slots 3–5 sit under 3:1 contrast on the light
+   surface, which is why every line is direct-labelled and the frames table exists.
 3. **Colour follows the entity, never its rank.** If a filter is missing from a night, the
    remaining series keep their own colours — do not repack them onto slots 1 and 2.
 4. **Status colours are reserved.** `--critical` and `--warning` mark failures and are never

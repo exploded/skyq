@@ -138,7 +138,15 @@ func Parse(r io.Reader, loc *time.Location) (*Result, error) {
 		if m := reCapture.FindStringSubmatch(line); m != nil {
 			pendingExposure, _ = strconv.ParseFloat(m[2], 64)
 			if m[3] != "" {
+				// The capture line names the wheel's actual position, so it
+				// is also the best evidence of where the wheel sits for the
+				// next long exposure whose capture line leaves the field
+				// empty. Without this, a night whose wheel never moves (it
+				// was already on the sequence's first filter) has no
+				// ChangeFilter line at all and every long exposure before
+				// the first wheel move is tagged with no filter.
 				pendingFilter = m[3]
+				curFilter = m[3]
 			} else {
 				pendingFilter = curFilter
 			}

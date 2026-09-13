@@ -169,7 +169,7 @@ line, tagged with all of that state. Emit `Event` records for failures.
 type Frame struct {
     At           time.Time
     ExposureSec  float64
-    Filter       string   // H, O, S, L
+    Filter       string   // H, O, S, L, R, G, B
     Target       string   // "IC 4628", "NGC 2070"
     DetectedStars int
     HFR          float64

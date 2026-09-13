@@ -2,6 +2,7 @@ package ninalog
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,5 +170,34 @@ func TestFailureEvents(t *testing.T) {
 	}
 	if !found {
 		t.Error("no PHD2 error at 00:17:12")
+	}
+}
+
+// A long exposure's capture line leaves the Filter field empty, so the
+// parser falls back to the last known wheel position. That position must
+// also be learned from short-exposure capture lines that do name the filter:
+// on 2026-09-12 the wheel was already on L when the sequence began, N.I.N.A.
+// never logged a ChangeFilter, and the first four lights had no filter.
+func TestFilterLatchesFromCaptureLine(t *testing.T) {
+	log := strings.Join([]string{
+		"2026-09-12T21:16:37.0000|INFO|CameraVM.cs|Capture|742|Starting Exposure - Exposure Time: 5s; Filter: L; Gain: 100; Offset 50; Binning: 2x2;",
+		"2026-09-12T21:16:44.0000|INFO|HocusFocusStarDetection.cs|BuildStarDetectionResult|818|Average HFR: 2.5, HFR MAD: 0.3, Detected Stars 649, Region: 0",
+		"2026-09-12T21:25:54.0000|INFO|CameraVM.cs|Capture|742|Starting Exposure - Exposure Time: 300s; Filter: ; Gain: 100; Offset 50; Binning: 1x1;",
+		"2026-09-12T21:30:56.0000|INFO|HocusFocusStarDetection.cs|BuildStarDetectionResult|818|Average HFR: 3.4, HFR MAD: 0.3, Detected Stars 1370, Region: 0",
+		"2026-09-12T21:31:00.0000|INFO|FilterWheelVM.cs|ChangeFilter|112|Moving to Filter R at Position 2",
+		"2026-09-12T21:31:02.0000|INFO|CameraVM.cs|Capture|742|Starting Exposure - Exposure Time: 300s; Filter: ; Gain: 100; Offset 50; Binning: 1x1;",
+		"2026-09-12T21:36:04.0000|INFO|HocusFocusStarDetection.cs|BuildStarDetectionResult|818|Average HFR: 4.0, HFR MAD: 0.3, Detected Stars 1160, Region: 0",
+	}, "\n")
+	res, err := Parse(strings.NewReader(log), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Frames) != 3 {
+		t.Fatalf("frames = %d, want 3", len(res.Frames))
+	}
+	for i, want := range []string{"L", "L", "R"} {
+		if got := res.Frames[i].Filter; got != want {
+			t.Errorf("frame %d filter = %q, want %q", i, got, want)
+		}
 	}
 }

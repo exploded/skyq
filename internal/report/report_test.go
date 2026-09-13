@@ -171,3 +171,42 @@ func referenceLumSeries(t *testing.T) []analysis.LumSample {
 	}
 	return samples
 }
+
+// An LRGB night must plot every filter: the slots are fixed per filter
+// (CHARTS.md rule 2) and a filter with no slot folds into "other" rather
+// than disappearing. The night of 2026-09-12 shipped with an empty chart
+// because only H, O and S had slots.
+func TestRenderLRGBNight(t *testing.T) {
+	base := map[analysis.BaselineKey]analysis.Baseline{}
+	var frames []ninalog.Frame
+	at := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
+	for i, fl := range []string{"L", "R", "G", "B", "Q", ""} {
+		base[analysis.BaselineKey{"NGC 2070", fl}] = analysis.Baseline{MedianStars: 800, NFrames: 4, Source: analysis.SourceSelf}
+		frames = append(frames, ninalog.Frame{
+			At: at.Add(time.Duration(i) * 5 * time.Minute), ExposureSec: 300,
+			Filter: fl, Target: "NGC 2070", DetectedStars: 780,
+		})
+	}
+	html, err := Render(Input{
+		NightOf:      "2026-09-12",
+		Frames:       frames,
+		Baselines:    base,
+		BaselineMode: "self",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, want := range []string{
+		"var(--series-4)", "var(--series-5)", "var(--series-6)", "var(--series-7)",
+		"var(--series-8)", "other (Q, no filter)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("report missing %q", want)
+		}
+	}
+	// one marker per light frame plus one hover halo per chart
+	if got := strings.Count(page, "<circle "); got != len(frames)+2 {
+		t.Errorf("index chart markers = %d, want %d", got-2, len(frames))
+	}
+}

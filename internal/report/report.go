@@ -57,13 +57,57 @@ type Input struct {
 }
 
 // filterSlots maps filters to their fixed palette slots (CHARTS.md rule 2:
-// assigned in slot order, never cycled, never re-hued).
+// assigned in slot order, never cycled, never re-hued). A light frame whose
+// filter is not listed here is never dropped: it folds into one "other"
+// series on otherSlotColor, so a filter the wheel has never shown before
+// still appears on the chart instead of vanishing.
 var filterSlots = []struct {
 	Filter, Label, Color string
 }{
 	{"H", "H α", "var(--series-1)"},
 	{"O", "O III", "var(--series-2)"},
 	{"S", "S II", "var(--series-3)"},
+	{"L", "L", "var(--series-4)"},
+	{"R", "R", "var(--series-5)"},
+	{"G", "G", "var(--series-6)"},
+	{"B", "B", "var(--series-7)"},
+}
+
+const otherSlotColor = "var(--series-8)"
+
+// otherSeries collects the light frames whose filter has no slot into one
+// series labelled with the filter names it holds.
+func otherSeries(frames []ninalog.Frame, baselines map[analysis.BaselineKey]analysis.Baseline, toMin func(time.Time) float64) (Series, bool) {
+	known := map[string]bool{}
+	for _, slot := range filterSlots {
+		known[slot.Filter] = true
+	}
+	var pts []Pt
+	var names []string
+	seen := map[string]bool{}
+	for _, f := range frames {
+		if f.Class() != ninalog.ClassLight || known[f.Filter] {
+			continue
+		}
+		idx, ok := analysis.Index(f, baselines)
+		if !ok {
+			continue
+		}
+		pts = append(pts, Pt{M: toMin(f.At), V: idx, Stars: f.DetectedStars, Target: f.Target})
+		name := f.Filter
+		if name == "" {
+			name = "no filter"
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	if len(pts) == 0 {
+		return Series{}, false
+	}
+	label := "other (" + strings.Join(names, ", ") + ")"
+	return Series{Name: label, Label: label, Color: otherSlotColor, Pts: pts}, true
 }
 
 type stat struct{ K, V, Small string }
@@ -131,6 +175,10 @@ func Render(in Input) ([]byte, error) {
 			series = append(series, Series{Name: slot.Label, Label: slot.Filter, Color: slot.Color, Pts: pts})
 			legend = append(legend, legendItem{Label: slot.Label, Color: slot.Color})
 		}
+	}
+	if other, ok := otherSeries(in.Frames, in.Baselines, toMin); ok {
+		series = append(series, other)
+		legend = append(legend, legendItem{Label: other.Label, Color: other.Color})
 	}
 
 	var bands []Band
