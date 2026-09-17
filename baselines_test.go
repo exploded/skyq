@@ -89,3 +89,54 @@ func TestChooseBaselinesTargetAfterOnset(t *testing.T) {
 		t.Error("NGC 2070/H frame still has no index")
 	}
 }
+
+// 2026-06-28 left NGC 346 H = 2 stars in the baselines table from a single
+// cloudy frame, and the live page divided by it. A pair with fewer than
+// MinBaselineFrames clear frames serves its own night only: it is not
+// stored, and that night is not history for later nights.
+func TestThinBaselinesStayOnTheirNight(t *testing.T) {
+	sdb, err := store.Open(filepath.Join(t.TempDir(), "skyq.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close()
+	q := db.New(sdb)
+	ctx := context.Background()
+
+	light := func(at time.Time, target, filter string, stars int) ninalog.Frame {
+		return ninalog.Frame{At: at, ExposureSec: 300, Target: target, Filter: filter, DetectedStars: stars}
+	}
+	thin := analysis.BaselineKey{Target: "NGC 346", Filter: "H"}
+	solid := analysis.BaselineKey{Target: "Gum 41", Filter: "H"}
+	t0 := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	res := &ninalog.Result{Frames: []ninalog.Frame{
+		light(t0, "Gum 41", "H", 100),
+		light(t0.Add(5*time.Minute), "Gum 41", "H", 110),
+		light(t0.Add(10*time.Minute), "Gum 41", "H", 120),
+		light(t0.Add(15*time.Minute), "NGC 346", "H", 2),
+	}}
+	base := analysis.Baselines(res.Frames, time.Time{}, false)
+	if base[thin].MedianStars != 2 {
+		t.Fatalf("NGC 346/H = %+v, want its own 2-star median tonight", base[thin])
+	}
+	if err := ingest(ctx, sdb, q, ingestInput{
+		night: "2026-06-28", logPath: "fixture", sha: "fixture",
+		res: res, baselines: base, mode: "self", volWindow: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := q.ListBaselines(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Target != solid.Target || rows[0].MedianStars != 110 {
+		t.Errorf("stored baselines = %+v, want only Gum 41/H = 110", rows)
+	}
+	if b, _, ok := historicalBaseline(ctx, q, thin, "2026-09-17"); ok {
+		t.Errorf("NGC 346/H history = %+v from a one-frame night", b)
+	}
+	if b, nights, ok := historicalBaseline(ctx, q, solid, "2026-09-17"); !ok || nights != 1 || b.MedianStars != 110 {
+		t.Errorf("Gum 41/H history = %+v over %d nights (ok=%v), want 110 over 1", b, nights, ok)
+	}
+}

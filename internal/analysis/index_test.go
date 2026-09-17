@@ -202,3 +202,36 @@ func TestDetectOnsetSynthetic(t *testing.T) {
 		t.Errorf("onset %s before volatility began %s", at, samples[30].At)
 	}
 }
+
+// 2026-09-17: the store held NGC 346 H = 2 stars from one cloudy frame, and
+// the live page divided tonight's 725 stars by it. Tonight's clear frames
+// must win, and a stored baseline from too few frames must not stand in.
+func TestLiveBaselines(t *testing.T) {
+	ngcH := BaselineKey{"NGC 346", "H"}
+	ngcS := BaselineKey{"NGC 346", "S"}
+	gum := BaselineKey{"Gum 41", "H"}
+	ic := BaselineKey{"IC 4628", "H"}
+	stored := map[BaselineKey]Baseline{
+		ngcH: {MedianStars: 2, NFrames: 1},
+		ngcS: {MedianStars: 3, NFrames: 1},
+		gum:  {MedianStars: 101, NFrames: 12},
+		ic:   {MedianStars: 332, NFrames: 55},
+	}
+	tonight := map[BaselineKey]Baseline{
+		ngcH: {MedianStars: 760, NFrames: 5, Source: SourceSelf},
+		ic:   {MedianStars: 300, NFrames: 1, Source: SourceSelf},
+	}
+	base := LiveBaselines(tonight, stored)
+	want := map[BaselineKey]float64{ngcH: 760, gum: 101, ic: 300}
+	for k, w := range want {
+		if base[k].MedianStars != w {
+			t.Errorf("%v = %+v, want %v", k, base[k], w)
+		}
+	}
+	if b, ok := base[ngcS]; ok {
+		t.Errorf("one-frame stored %v kept: %+v", ngcS, b)
+	}
+	if v, _ := Index(ninalog.Frame{Target: "NGC 346", Filter: "H", DetectedStars: 725}, base); v > 150 {
+		t.Errorf("NGC 346 H index = %v", v)
+	}
+}

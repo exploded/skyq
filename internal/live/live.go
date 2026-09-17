@@ -365,13 +365,10 @@ func (e *Engine) tailLog(s *Snapshot, res *ninalog.Result, roof analysis.RoofTim
 	onset, hasOnset := analysis.DetectOnset(sky, e.opt.Window, e.opt.Threshold)
 	s.Events = analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, hasOnset)
 
-	// Live index: median index of the last few light frames against known
-	// baselines — rolling historical if the store has them, else tonight's
-	// own running medians.
-	base := e.loadBaselines(now)
-	if len(base) == 0 {
-		base = analysis.Baselines(res.Frames, onset, hasOnset)
-	}
+	// Live index: median index of the last few light frames. Tonight's own
+	// clear-frame medians win, as in the report; stored baselines only
+	// cover pairs with no clear frames yet tonight.
+	base := analysis.LiveBaselines(analysis.Baselines(res.Frames, onset, hasOnset), e.loadBaselines(now))
 	var idx []float64
 	for _, f := range res.Frames {
 		if f.Class() != ninalog.ClassLight {

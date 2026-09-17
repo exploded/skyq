@@ -55,6 +55,30 @@ func Baselines(frames []ninalog.Frame, cutoff time.Time, hasCutoff bool) map[Bas
 	return out
 }
 
+// MinBaselineFrames is the fewest clear frames a baseline needs before it
+// counts beyond its own night — stored, or as one night of history. On
+// 2026-06-28 a single NGC 346 H frame through cloud read 2 stars; stored as
+// the baseline, it turned 725 stars on 2026-09-17 into an index of 36250.
+const MinBaselineFrames = 3
+
+// LiveBaselines picks the live index's divisors the way the report does:
+// tonight's clear-frame baselines win, and a stored baseline only fills a
+// pair with none tonight — and only if MinBaselineFrames stand behind it.
+func LiveBaselines(tonight, stored map[BaselineKey]Baseline) map[BaselineKey]Baseline {
+	out := make(map[BaselineKey]Baseline, len(tonight)+len(stored))
+	for k, b := range stored {
+		if b.NFrames >= MinBaselineFrames && b.MedianStars > 0 {
+			out[k] = b
+		}
+	}
+	for k, b := range tonight {
+		if b.MedianStars > 0 {
+			out[k] = b
+		}
+	}
+	return out
+}
+
 // LightPairs lists every (target, filter) pair that has at least one light
 // frame, in first-seen order.
 func LightPairs(frames []ninalog.Frame) []BaselineKey {

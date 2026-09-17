@@ -224,6 +224,15 @@ each night's baseline; the report must say which it used.
 "Clear" for baseline purposes = frames before the all-sky cloud onset (§4.4), or all frames
 if no onset was detected.
 
+**Too few frames to carry forward.** A baseline built from fewer than 3 clear frames still
+serves its own night, but is not written to the baselines table, and a night with fewer than
+3 clear frames for a pair does not count as history for it. With no onset detected, one frame
+through cloud counts as clear: on 2026-06-28 a single NGC 346 H frame read 2 stars, and that
+stored divisor put the live index for 2026-09-17 at 36250.
+
+**The live index** (§7) picks divisors the same way: tonight's clear-frame baseline wins, and
+a stored baseline only covers a pair with no clear frames yet tonight.
+
 **A target that only begins after the onset** has no clear frames tonight, so the rule above
 gives it no baseline and its frames no index (2026-09-03: onset 21:20, NGC 2070 started
 23:50, 54 subs vanished from the chart). For such a `(target, filter)` pair, in order:

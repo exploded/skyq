@@ -261,7 +261,8 @@ func chooseBaselines(ctx context.Context, q *db.Queries, frames []ninalog.Frame,
 
 // historicalBaseline is the rolling median of per-night medians over the
 // most recent clear nights (at most 10) on record for one pair, excluding
-// tonight. ok is false when there is no history at all.
+// tonight. A night with fewer than MinBaselineFrames clear frames doesn't
+// count. ok is false when there is no usable history.
 func historicalBaseline(ctx context.Context, q *db.Queries, k analysis.BaselineKey, night string) (analysis.Baseline, int, bool) {
 	rows, err := q.ListClearLightFrames(ctx, db.ListClearLightFramesParams{Target: k.Target, Filter: k.Filter})
 	if err != nil {
@@ -273,6 +274,11 @@ func historicalBaseline(ctx context.Context, q *db.Queries, k analysis.BaselineK
 			continue
 		}
 		perNight[r.NightOf] = append(perNight[r.NightOf], float64(r.DetectedStars))
+	}
+	for n, v := range perNight {
+		if len(v) < analysis.MinBaselineFrames {
+			delete(perNight, n)
+		}
 	}
 	if len(perNight) == 0 {
 		return analysis.Baseline{}, 0, false
@@ -388,6 +394,9 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 	for k, b := range in.baselines {
 		if b.Source == analysis.SourceWholeNight {
 			continue // a cloud-included divisor is not a clear-sky reference
+		}
+		if b.NFrames < analysis.MinBaselineFrames {
+			continue // too few frames to trust on another night
 		}
 		if err := qtx.UpsertBaseline(ctx, db.UpsertBaselineParams{
 			Target: k.Target, Filter: k.Filter, MedianStars: b.MedianStars,
