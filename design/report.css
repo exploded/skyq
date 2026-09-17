@@ -28,6 +28,7 @@
   --axis:           #c3c2b7;   /* baseline / axis rules */
   --border:         rgba(11, 11, 11, .10);
   --band:           rgba(11, 11, 11, .05);   /* autofocus run shading */
+  --roof:           rgba(11, 11, 11, .16);   /* roof-shut hatch strokes */
 
   /* categorical series — fixed order, never cycled, never re-hued.
      slot 1 = H alpha, slot 2 = O III, slot 3 = S II,
@@ -59,6 +60,7 @@
     --axis:           #383835;
     --border:         rgba(255, 255, 255, .10);
     --band:           rgba(255, 255, 255, .07);
+    --roof:           rgba(255, 255, 255, .16);
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -81,6 +83,7 @@
   --axis:           #383835;
   --border:         rgba(255, 255, 255, .10);
   --band:           rgba(255, 255, 255, .07);
+  --roof:           rgba(255, 255, 255, .16);
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;

@@ -309,6 +309,10 @@ what proves the night was open. Hence two rules:
 2. **Unknown is not closed.** A night the log says nothing about is analysed exactly as it
    was before the gate existed. Absence of a log line must never blank real sky (§8 rule 3).
 
+The luminance chart, live and in the report, hatches the stretches the log says the roof was
+shut or moving and labels them *roof shut*. Unknown stretches are left plain, for the same
+reason as rule 2.
+
 The gate changes nothing on the validated night — the roof was open throughout, so §9 holds
 unchanged. On 2026-08-31/09-01, where the roof shut at 01:20 and reopened at 05:04, it
 excludes 659 of 2032 stills and leaves the 01:12 onset (eight minutes before the roof shut)

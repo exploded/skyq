@@ -181,7 +181,7 @@ func (s *Server) render(w http.ResponseWriter, name string) {
 		})
 	}
 	if len(snap.Samples) >= 2 {
-		d.Chart = template.HTML(lumChart(snap.Samples))
+		d.Chart = template.HTML(lumChart(snap.Samples, snap.RoofSpans))
 		d.HasChart = true
 		// The all-sky box captures all night whether or not skyq is
 		// running, so a fresh start fills the chart back to dusk. Say
@@ -217,7 +217,7 @@ func (s *Server) render(w http.ResponseWriter, name string) {
 
 // lumChart renders tonight's luminance with the report's chart machinery,
 // so live and morning views are visually the same system.
-func lumChart(samples []analysis.LumSample) string {
+func lumChart(samples []analysis.LumSample, roof []analysis.RoofSpan) string {
 	origin := samples[0].At.Truncate(15 * time.Minute)
 	span := math.Max(60, math.Ceil(samples[len(samples)-1].At.Sub(origin).Minutes()/15)*15)
 	toMin := func(t time.Time) float64 { return t.Sub(origin).Minutes() }
@@ -236,6 +236,7 @@ func lumChart(samples []analysis.LumSample) string {
 			YLabel: "Mean sky luminance (0–255)", SpanMin: span,
 			TickStart: firstHour.Sub(origin).Minutes(),
 			TickLabel: func(m float64) string { return origin.Add(time.Duration(m * float64(time.Minute))).Format("15:04") },
+			RoofBands: report.RoofBands(roof, origin, span),
 			YFmt:      func(v float64) string { return fmt.Sprintf("%.0f", v) },
 		})
 }

@@ -50,6 +50,9 @@ type Input struct {
 	// RoofNote explains any stretch missing from the luminance chart because
 	// the roof was shut over it. Empty when the log recorded no roof moves.
 	RoofNote string
+	// RoofSpans is the night's known roof history; shut and moving stretches
+	// are hatched on the luminance chart.
+	RoofSpans []analysis.RoofSpan
 
 	Flats            []ninalog.FlatFrame
 	FlatExposures    []float64
@@ -226,7 +229,8 @@ func Render(in Input) ([]byte, error) {
 	lumChart := RenderChart(lumSeries, ChartOpts{
 		H: 210, YMax: lumYMax(lumPts), YTicks: 4, GapMin: 6, YLabel: "Mean sky luminance (0–255)",
 		SpanMin: span, TickStart: tickOff, TickLabel: tickLabel,
-		YFmt: func(v float64) string { return fmt.Sprintf("%.0f", v) },
+		RoofBands: RoofBands(in.RoofSpans, origin, span),
+		YFmt:      func(v float64) string { return fmt.Sprintf("%.0f", v) },
 	})
 
 	verdict, stats, eventNote := narrate(in)
@@ -295,6 +299,41 @@ func chartSpan(in Input) (time.Time, float64) {
 		span = 60
 	}
 	return origin, span
+}
+
+// RoofBands turns a night's roof history into chart bands: one per unbroken
+// stretch the log says the roof was shut or moving, clipped to the chart.
+// Unknown stretches get no band — a log that never mentions the roof is not
+// evidence it was shut (SPEC §4.4).
+func RoofBands(spans []analysis.RoofSpan, origin time.Time, span float64) []Band {
+	var bands []Band
+	var from, to time.Time
+	flush := func() {
+		if from.IsZero() {
+			return
+		}
+		m0 := math.Max(0, from.Sub(origin).Minutes())
+		m1 := math.Min(span, to.Sub(origin).Minutes())
+		if m1 > m0 {
+			bands = append(bands, Band{M0: m0, M1: m1})
+		}
+		from, to = time.Time{}, time.Time{}
+	}
+	for _, sp := range spans {
+		if sp.State != ninalog.RoofClosed && sp.State != ninalog.RoofMoving {
+			flush()
+			continue
+		}
+		if !from.IsZero() && sp.From.After(to) {
+			flush() // an unknown gap separates them
+		}
+		if from.IsZero() {
+			from = sp.From
+		}
+		to = sp.To
+	}
+	flush()
+	return bands
 }
 
 func lumYMax(pts []Pt) float64 {

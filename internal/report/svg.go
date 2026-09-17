@@ -36,7 +36,8 @@ type EventMark struct {
 	Kind string // "solve" → triangle/critical, anything else → diamond/warning
 }
 
-// Band is a shaded autofocus window.
+// Band is a shaded time window: an autofocus run, or a stretch the roof was
+// shut over the all-sky camera.
 type Band struct{ M0, M1 float64 }
 
 // Divider is a dashed vertical rule at a target change, labelled with the
@@ -62,11 +63,17 @@ type ChartOpts struct {
 	TickStart  float64   // minutes offset of the first hour tick
 	TickLabel  func(m float64) string
 	Bands      []Band
+	RoofBands  []Band // hatched, labelled "roof shut"; luminance chart only
 	Events     []EventMark
 	YFmt       func(v float64) string
 }
 
 const (
+	// roofHatchID is unique per page only because the luminance chart is the
+	// one chart that carries roof bands (CHARTS.md draw order 1).
+	roofHatchID   = "roof-hatch"
+	roofLabelMinW = 64
+
 	chartW = 940
 	padL   = 54
 	padR   = 62
@@ -87,10 +94,19 @@ func RenderChart(series []Series, o ChartOpts) string {
 
 	var b strings.Builder
 
-	// 1. autofocus bands
+	// 1. autofocus bands, then roof bands. The roof hatch is a pattern so it
+	// reads differently from an autofocus band without leaning on colour.
 	for _, band := range o.Bands {
 		fmt.Fprintf(&b, `<rect x="%.1f" y="%d" width="%.1f" height="%.1f" fill="var(--band)"/>`,
 			X(band.M0), padT, math.Max(2, X(band.M1)-X(band.M0)), ph)
+	}
+	if len(o.RoofBands) > 0 {
+		fmt.Fprintf(&b, `<defs><pattern id="%s" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">`+
+			`<rect width="6" height="6" fill="var(--band)"/><path d="M0 0 V6" stroke="var(--roof)" stroke-width="1.5"/></pattern></defs>`, roofHatchID)
+	}
+	for _, band := range o.RoofBands {
+		fmt.Fprintf(&b, `<rect x="%.1f" y="%d" width="%.1f" height="%.1f" fill="url(#%s)"/>`,
+			X(band.M0), padT, math.Max(2, X(band.M1)-X(band.M0)), ph, roofHatchID)
 	}
 	// 2–3. gridlines + y tick labels
 	for i := 0; i <= o.YTicks; i++ {
@@ -114,6 +130,12 @@ func RenderChart(series []Series, o ChartOpts) string {
 	}
 	if o.StartLabel != "" {
 		fmt.Fprintf(&b, `<text x="%d" y="%d" class="reftxt">%s</text>`, padL+6, padT+11, esc(o.StartLabel))
+	}
+	for _, band := range o.RoofBands {
+		// Named only where the band is wide enough to hold the words.
+		if X(band.M1)-X(band.M0) >= roofLabelMinW {
+			fmt.Fprintf(&b, `<text x="%.1f" y="%d" class="reftxt">roof shut</text>`, X(band.M0)+5, padT+11)
+		}
 	}
 	for _, dv := range o.Dividers {
 		fmt.Fprintf(&b, `<line x1="%.1f" x2="%.1f" y1="%d" y2="%.1f" class="refline"/>`, X(dv.M), X(dv.M), padT, padT+ph)

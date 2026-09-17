@@ -138,7 +138,7 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		Baselines: baselines, BaselineMode: mode,
 		Stills: stills, Untrustworthy: untrust,
 		Flats: res.Flats, FlatExposures: res.FlatExposures, FlatsUnstableSky: flatsUnstable,
-		RoofNote: roofNote,
+		RoofNote: roofNote, RoofSpans: roof.Spans(),
 	})
 	if err != nil {
 		return fmt.Errorf("render: %w", err)

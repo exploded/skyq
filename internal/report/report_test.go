@@ -71,6 +71,7 @@ func TestRenderFixtureNight(t *testing.T) {
 		Untrustworthy: untrust,
 		Flats:         res.Flats,
 		FlatExposures: res.FlatExposures,
+		RoofSpans:     analysis.NewRoofTimeline(res.RoofMoves, time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)).Spans(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +101,10 @@ func TestRenderFixtureNight(t *testing.T) {
 	if got := strings.Count(page, `fill="var(--band)"`); got != 14 {
 		t.Errorf("autofocus bands = %d, want 14", got)
 	}
+	// The roof was open all night; the 06:36 close is after the chart ends.
+	if strings.Contains(page, "url(#roof-hatch)") {
+		t.Error("roof band drawn on a night the roof was open throughout")
+	}
 
 	if err := os.WriteFile("../../.local/preview-report.html", html, 0o644); err == nil {
 		t.Logf("preview written to .local/preview-report.html (%d KB)", len(html)/1024)
@@ -108,6 +113,41 @@ func TestRenderFixtureNight(t *testing.T) {
 
 // When a target has only a whole-night divisor the report must say so —
 // its index is relative, and a reader comparing nights needs to know.
+func TestRoofBands(t *testing.T) {
+	at := func(h, m int) time.Time { return time.Date(2026, 8, 31, h, m, 0, 0, time.UTC) }
+	origin := at(19, 0)
+	span := 240.0 // 19:00–23:00
+	spans := []analysis.RoofSpan{
+		{From: at(12, 0), To: at(19, 50), State: ninalog.RoofClosed},
+		{From: at(19, 50), To: at(19, 51), State: ninalog.RoofMoving},
+		{From: at(19, 51), To: at(21, 0), State: ninalog.RoofOpen},
+		{From: at(21, 0), To: at(21, 1), State: ninalog.RoofMoving},
+		// 21:01–21:30 unknown: the close finished with no logged state.
+		{From: at(21, 30), To: at(22, 0), State: ninalog.RoofClosed},
+		{From: at(22, 30), To: at(23, 59), State: ninalog.RoofClosed},
+	}
+	got := RoofBands(spans, origin, span)
+	want := []Band{
+		{M0: 0, M1: 51},    // shut before the chart, clipped to its start; the move joins it
+		{M0: 120, M1: 121}, // a lone move
+		{M0: 150, M1: 180}, // unknown on both sides keeps it separate
+		{M0: 210, M1: 240}, // clipped to the chart's end
+	}
+	if len(got) != len(want) {
+		t.Fatalf("bands = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("band %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	// A night the log says nothing about draws no roof at all.
+	if b := RoofBands(nil, origin, span); len(b) != 0 {
+		t.Errorf("no roof history: bands = %v, want none", b)
+	}
+}
+
 func TestRenderBaselineFallbackNote(t *testing.T) {
 	base := map[analysis.BaselineKey]analysis.Baseline{
 		{Target: "IC 4628", Filter: "H"}:  {MedianStars: 332, NFrames: 8, Source: analysis.SourceSelf},

@@ -75,6 +75,12 @@ letting a spike escape the plot.
 Back to front. Getting this wrong buries the data under the chrome.
 
 1. **Autofocus bands** — `<rect>` filled `var(--band)`, full plot height, one per AF window.
+   **Roof bands** (luminance chart only) follow: one `<rect>` per unbroken stretch the log
+   says the roof was shut or moving, filled with a 45° hatch — a `<pattern id="roof-hatch">`
+   of `var(--roof)` strokes on `var(--band)`, 6px apart. The hatch is what separates it from
+   an autofocus band, so it never relies on colour. Unknown roof state gets no band. The
+   pattern id is page-global, which is safe only while the luminance chart is the one chart
+   that draws roof bands.
 2. **Gridlines** — horizontal, `class="gl"`, at each y tick.
 3. **Y tick labels** — `class="tick"`, `text-anchor="end"`, at `x = L-9`, `y = Y(v)+4`.
 4. **X ticks** — a 4px stub below the baseline every 60 minutes, label `class="tick"`,
@@ -86,6 +92,8 @@ Back to front. Getting this wrong buries the data under the chrome.
    100 labelled *clear-sky baseline* (right-aligned, 6px above the rule) and a vertical rule
    at each target change labelled with the new target name (5px right of the rule, near the
    top).
+   Each roof band at least 64px wide is labelled *roof shut* in `class="reftxt"`, 5px inside
+   its left edge, near the top.
 8. **Series** — line first, then markers on top. `stroke-width: 2`, round joins and caps.
    Markers `r=2.8`, filled with the series colour, with a `1.5px` stroke in `var(--surface-1)`
    so overlapping points stay separable.
