@@ -110,9 +110,9 @@ func TestRenderFixtureNight(t *testing.T) {
 // its index is relative, and a reader comparing nights needs to know.
 func TestRenderBaselineFallbackNote(t *testing.T) {
 	base := map[analysis.BaselineKey]analysis.Baseline{
-		{"IC 4628", "H"}:  {MedianStars: 332, NFrames: 8, Source: analysis.SourceSelf},
-		{"NGC 2070", "H"}: {MedianStars: 250, NFrames: 18, Source: analysis.SourceWholeNight},
-		{"NGC 2070", "O"}: {MedianStars: 228, NFrames: 12, Source: analysis.SourceHistorical},
+		{Target: "IC 4628", Filter: "H"}:  {MedianStars: 332, NFrames: 8, Source: analysis.SourceSelf},
+		{Target: "NGC 2070", Filter: "H"}: {MedianStars: 250, NFrames: 18, Source: analysis.SourceWholeNight},
+		{Target: "NGC 2070", Filter: "O"}: {MedianStars: 228, NFrames: 12, Source: analysis.SourceHistorical},
 	}
 	at := time.Date(2026, 9, 3, 22, 0, 0, 0, time.UTC)
 	html, err := Render(Input{
@@ -181,7 +181,7 @@ func TestRenderLRGBNight(t *testing.T) {
 	var frames []ninalog.Frame
 	at := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
 	for i, fl := range []string{"L", "R", "G", "B", "Q", ""} {
-		base[analysis.BaselineKey{"NGC 2070", fl}] = analysis.Baseline{MedianStars: 800, NFrames: 4, Source: analysis.SourceSelf}
+		base[analysis.BaselineKey{Target: "NGC 2070", Filter: fl}] = analysis.Baseline{MedianStars: 800, NFrames: 4, Source: analysis.SourceSelf}
 		frames = append(frames, ninalog.Frame{
 			At: at.Add(time.Duration(i) * 5 * time.Minute), ExposureSec: 300,
 			Filter: fl, Target: "NGC 2070", DetectedStars: 780,
