@@ -8,6 +8,7 @@ package report
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -141,7 +142,10 @@ func RenderChart(series []Series, o ChartOpts) string {
 		fmt.Fprintf(&b, `<line x1="%.1f" x2="%.1f" y1="%d" y2="%.1f" class="refline"/>`, X(dv.M), X(dv.M), padT, padT+ph)
 		fmt.Fprintf(&b, `<text x="%.1f" y="%d" class="reftxt">%s</text>`, X(dv.M)+5, padT+11, esc(dv.Label))
 	}
-	// 8–9. series: line, markers, direct label
+	// 8–9. series: line, markers, direct label. Labels are collected and
+	// drawn after every line, both to keep the draw order (CHARTS.md 9) and
+	// so converging series can be nudged apart before anything is written.
+	var labels []dirLabel
 	for _, s := range series {
 		if len(s.Pts) == 0 {
 			continue
@@ -165,8 +169,13 @@ func RenderChart(series []Series, o ChartOpts) string {
 			}
 		}
 		last := s.Pts[len(s.Pts)-1]
-		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" class="dl" fill="%s">%s</text>`,
-			math.Min(chartW-3, X(last.M)+9), Y(last.V)+4, s.Color, esc(s.Label))
+		labels = append(labels, dirLabel{
+			X: math.Min(chartW-3, X(last.M)+9), Y: Y(last.V) + 4,
+			Color: s.Color, Text: s.Label,
+		})
+	}
+	for _, l := range spreadLabels(labels, float64(padT), float64(o.H)) {
+		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" class="dl" fill="%s">%s</text>`, l.X, l.Y, l.Color, esc(l.Text))
 	}
 	// 10. event rail
 	if o.Rail {
@@ -193,6 +202,44 @@ func RenderChart(series []Series, o ChartOpts) string {
 	fmt.Fprintf(&b, `<line x1="0" x2="0" y1="%d" y2="%.1f" class="ax cross" opacity="0"/>`, padT, padT+ph)
 	b.WriteString(`<circle r="5.5" fill="none" stroke-width="2" class="halo" opacity="0"/>`)
 	return b.String()
+}
+
+// dirLabel is one direct series label, at the series' last point.
+type dirLabel struct {
+	X, Y        float64
+	Color, Text string
+}
+
+// dirLabelGap is the least vertical distance between two direct labels
+// sharing an x position — a little over the 11.5px font size, so the two
+// lines of text clear each other.
+const dirLabelGap = 13
+
+// spreadLabels pushes overlapping direct labels apart. Two series that end
+// the night at almost the same value — RA and Dec guide error routinely do
+// — would otherwise print one on top of the other and read as neither.
+func spreadLabels(labels []dirLabel, top, height float64) []dirLabel {
+	if len(labels) < 2 {
+		return labels
+	}
+	out := append([]dirLabel(nil), labels...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Y < out[j].Y })
+	for i := 1; i < len(out); i++ {
+		// Only labels in the same column can collide.
+		if math.Abs(out[i].X-out[i-1].X) > 24 {
+			continue
+		}
+		if gap := out[i].Y - out[i-1].Y; gap < dirLabelGap {
+			out[i].Y = out[i-1].Y + dirLabelGap
+		}
+	}
+	// A stack pushed past the bottom slides back up as a block.
+	if over := out[len(out)-1].Y - (height - 4); over > 0 {
+		for i := range out {
+			out[i].Y = math.Max(top+4, out[i].Y-over)
+		}
+	}
+	return out
 }
 
 func esc(s string) string {

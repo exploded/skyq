@@ -29,6 +29,12 @@ type Config struct {
 
 	NINALogDir string `json:"nina_log_dir"` // %LOCALAPPDATA%\NINA\Logs
 
+	// PHD2LogDir holds the PHD2 guide logs (PHD2_GuideLog_*.txt). Empty
+	// means PHD2's own default, %USERPROFILE%\Documents\PHD2. Guiding is a
+	// bonus input: a directory that does not exist costs the report its
+	// guiding card and nothing else.
+	PHD2LogDir string `json:"phd2_log_dir"`
+
 	AllSkyBaseURL  string `json:"allsky_base_url"` // http://allsky.local/images
 	AllSkyUsername string `json:"allsky_username"`
 	AllSkyPassword string `json:"allsky_password"`
@@ -88,6 +94,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.NINALogDir == "" {
 		cfg.NINALogDir = os.ExpandEnv(`${LOCALAPPDATA}\NINA\Logs`)
+	}
+	if cfg.PHD2LogDir == "" {
+		cfg.PHD2LogDir = os.ExpandEnv(`${USERPROFILE}\Documents\PHD2`)
 	}
 	return cfg, nil
 }

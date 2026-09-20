@@ -1,6 +1,7 @@
 {
   "timezone": "",
   "nina_log_dir": "",
+  "phd2_log_dir": "",
   "allsky_base_url": "http://allsky.local/images",
   "cache_dir": "cache",
   "db_path": "skyq.db",

@@ -39,6 +39,16 @@
   <div class="chartbox" id="b2"><svg id="c2" viewBox="0 0 940 210">{{.LumChart}}</svg><div class="tip" id="t2"></div></div>
 </div>
 
+{{if .HasGuide}}<div class="card">
+  <h2>PHD2 guiding</h2>
+  <p class="note">{{.GuideNote}}</p>
+  <div class="legend">
+{{range .GuideLegend}}    <span><i class="dot" style="background:{{.Color}}"></i>{{.Label}}</span>
+{{end}}    <span style="color:var(--warning)">&#9670;<span style="color:var(--text-secondary)">&nbsp;PHD2 error</span></span>
+  </div>
+  <div class="chartbox" id="b3"><svg id="c3" viewBox="0 0 940 224">{{.GuideChart}}</svg><div class="tip" id="t3"></div></div>
+</div>
+{{end}}
 {{if .Shots}}<div class="card">
   <h2>All&#8209;sky frames at the key moments</h2>
   <p class="note">Times come from the still filenames, so they line up with the charts exactly.</p>
@@ -87,7 +97,7 @@ function hover(c){
     if(!best||bd>14){tip.style.opacity=0;cross.setAttribute('opacity',0);halo.setAttribute('opacity',0);return;}
     cross.setAttribute('x1',X(best.m));cross.setAttribute('x2',X(best.m));cross.setAttribute('opacity',.6);
     halo.setAttribute('cx',X(best.m));halo.setAttribute('cy',Y(best.v));halo.setAttribute('stroke',bs.color);halo.setAttribute('opacity',1);
-    const val=c.fmt==='pct'?best.v.toFixed(0)+'%':best.v.toFixed(1);
+    const val=c.fmt==='pct'?best.v.toFixed(0)+'%':c.fmt==='arcsec'?best.v.toFixed(2)+'″':best.v.toFixed(1);
     tip.innerHTML='<div style="color:var(--text-secondary);margin-bottom:2px">'+hm(best.m)+(best.target?' &middot; '+best.target:'')+'</div>'+
       '<span class="sw" style="background:'+bs.color+'"></span>'+bs.name+' <b>'+val+'</b>'+
       (best.stars!==undefined?' <span style="color:var(--text-secondary)">('+best.stars+' stars)</span>':'');

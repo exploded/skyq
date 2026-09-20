@@ -29,8 +29,11 @@ at 09:00. No settings UI — config.json (gitignored, secrets) + CLI only.
   included
 - `internal/server` — read-only HTMX 4 live page on :8996
 - `internal/ninalog` — log parser, pure; patterns validated on N.I.N.A. 3.2.0.9001
+- `internal/phd2` — PHD2 guide-log parser, pure; feeds the report's guiding
+  chart only (SPEC §4.6)
 - `internal/allsky` — luminance (pure) + stills fetch/scan
-- `internal/analysis` — baselines, index, cloud detection, event attribution
+- `internal/analysis` — baselines, index, cloud detection, event attribution,
+  guide-error binning
 - `internal/store` — SQLite via sqlc (modernc, no CGO); schema.sql is the source of truth
 - `internal/report` — self-contained HTML report; design/ is the look's source of truth
 - `internal/publish` — scp to the Linode; failure never blocks the local report
@@ -48,14 +51,20 @@ at 09:00. No settings UI — config.json (gitignored, secrets) + CLI only.
   N.I.N.A. log (`DomeVM.cs` shutter lines) and gates the luminance series
   (SPEC §4.4). N.I.N.A. never sees a roof opened by hand, so **unknown must
   keep behaving exactly as it did before the gate** — never as closed.
+- **Guide RMS is taken about zero, not about the mean.** PHD2's own live
+  graph de-means it; skyq does not, because drift across a minute is the
+  error the morning report is looking for. A `DROP` row is a frame PHD2
+  discarded, never a measurement of zero error. A night with no guide log
+  gets no guiding card — never a flat line at zero.
 - **Two median conventions on purpose**: baselines use median_high; index
   stats use Python-statistics median + exclusive (R-6) quartiles. §9 breaks
   otherwise.
 - `internal/report/report.css` must stay byte-identical to
   `design/report.css` (a test enforces it). Chart geometry lives in
   `design/CHARTS.md` — read it before touching svg.go.
-- `.local/` holds real sample data (N.I.N.A. logs, AF JSONs, PHD2 logs) used
-  by the robustness tests; it is gitignored, do not commit it.
+- `.local/` holds real sample data (N.I.N.A. logs, AF JSONs, PHD2 guide logs
+  under `.local/PHD2/`) used by the robustness tests and the report previews;
+  it is gitignored, do not commit it.
 
 ## Safety (SPEC §8 — hard rules)
 

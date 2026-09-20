@@ -4,7 +4,8 @@ Sky transparency analyser for the observatory. Parses each night's N.I.N.A.
 log and the all-sky camera's stills, computes a normalised transparency
 index (star counts per target × filter against a clear-sky baseline),
 detects cloud onset independently of N.I.N.A., attributes failures to their
-causes, and writes a self-contained HTML morning report.
+causes, charts the night's PHD2 guiding alongside it, and writes a
+self-contained HTML morning report.
 
 See `SPEC.md` for the full design and the validated acceptance numbers.
 
@@ -26,6 +27,10 @@ All commands take `--config config.json` (default `./config.json`).
    coordinates (`config.json` is gitignored — never commit it). The AllSky
    `/images/` listing is open HTTP; if it ever gains Basic auth, add
    `allsky_username` / `allsky_password` back to config.json.
+   `phd2_log_dir` may be left empty: it defaults to PHD2's own
+   `%USERPROFILE%\Documents\PHD2`. Set it if PHD2 writes its guide logs
+   elsewhere; a directory that is not there costs the report its guiding
+   chart and nothing else.
 3. Test a night: `skyq.exe report --night 2026-09-02`
 4. Task Scheduler: create a daily task at 09:00 running `run-report.bat`
    (it cds to its own folder and appends output to `skyq-report.log`).
@@ -115,3 +120,7 @@ never blocks the local report. One-time setup on the machine that runs skyq:
   nights exist for a target × filter pair.
 - Stills are cached under `cache/YYYYMMDD/` and can be pruned freely;
   derived samples live in the database.
+- PHD2 guide logs are read straight from `phd2_log_dir` each run and nothing
+  from them is stored. A report only shows the guiding of a night whose
+  guide log is still on disk, so `skyq backfill` reaches back exactly as far
+  as PHD2's own log retention allows.

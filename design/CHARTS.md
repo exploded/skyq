@@ -32,7 +32,9 @@ is measurably harder to read.
    reused as a series. They always ship with a shape (▲ / ◆) and a legend label, never colour
    alone.
 5. **Legend always present for 2+ series**, and with ≤ 4 series also direct-label each line at
-   its last point. Identity must never depend on colour alone.
+   its last point. Identity must never depend on colour alone. A legend swatch's colour must
+   reach the template as `template.CSS`: `html/template` filters a bare `var(--series-1)` out
+   of a `style` attribute and substitutes `ZgotmplZ`, which renders as an invisible dot.
 6. **Text wears text tokens, not series colours** — axis ticks, captions and values stay in
    `--muted` / `--text-secondary`. The only coloured text is a direct series label.
 7. **Never define a colour only inside a media query.** Light on bare `:root`, dark redefined
@@ -44,11 +46,11 @@ is measurably harder to read.
 
 ## Geometry
 
-Both charts use the same viewBox width and margins so their x-axes align visually when
+Every chart uses the same viewBox width and margins so their x-axes align visually when
 stacked.
 
 ```
-viewBox   0 0 940 H          H = 320 (index chart), 210 (luminance chart)
+viewBox   0 0 940 H          H = 320 (index), 210 (luminance), 224 (guiding)
 left      L = 54             room for y-axis tick labels
 right     R = 62             room for direct series labels outside the plot
 top       T = 30             room for the axis label above the top gridline
@@ -57,6 +59,9 @@ plotW     940 - L - R
 plotH     H - T - B
 ```
 
+The guiding chart is 224 rather than 210 because it carries an event rail: 224 - 30 - 44 is the
+same 150px plot area as 210 - 30 - 30, so the three charts stack as one grid.
+
 Scales:
 
 ```go
@@ -64,8 +69,8 @@ x := func(min float64) float64 { return L + (min/spanMinutes)*plotW }
 y := func(v float64) float64   { return T + plotH - (math.Min(v, yMax)/yMax)*plotH }
 ```
 
-`spanMinutes` is measured from a fixed chart origin (the prototype used 20:45 local) so both
-charts and the event rail share one coordinate system. Clamp values at `yMax` rather than
+`spanMinutes` is measured from a fixed chart origin (the prototype used 20:45 local) so every
+chart and the event rail share one coordinate system. Clamp values at `yMax` rather than
 letting a spike escape the plot.
 
 ---
@@ -98,7 +103,11 @@ Back to front. Getting this wrong buries the data under the chrome.
    Markers `r=2.8`, filled with the series colour, with a `1.5px` stroke in `var(--surface-1)`
    so overlapping points stay separable.
 9. **Direct labels** — `class="dl"`, `fill` = series colour, at the last point, `x+9`, `y+4`,
-   clamped to stay inside the viewBox.
+   clamped to stay inside the viewBox. Labels within 24px of each other horizontally are
+   pushed at least 13px apart vertically before any of them is drawn, and a stack that runs
+   past the bottom slides back up as a block. Two series that end the night at nearly the
+   same value — RA and Dec guide error routinely do — would otherwise print on top of each
+   other and read as neither.
 10. **Event rail** — see below.
 11. **Crosshair and hover halo** — added last, `opacity: 0` until hover.
 
@@ -110,6 +119,8 @@ A line must break rather than draw a straight run across a period with no data. 
 - index chart: **75 minutes** (a filter can legitimately go that long between subs in an
   H/O/S rotation)
 - luminance chart: **6 minutes**
+- guiding chart: **3 minutes** (anything longer is a slew, a dither settle or an autofocus
+  run — PHD2 was not guiding, and the line must break rather than imply it was)
 
 ### Event rail
 
@@ -128,6 +139,40 @@ diamond   M x,y-5  L x+5,y    L x,y+5    L x-5,y  Z
 
 ---
 
+## The guiding chart
+
+Third chart, same x-axis, drawn from the PHD2 guide log.
+
+A night holds thousands of guide frames — about 6,500 at a 5 s guide exposure — and the plot
+is 824px wide. Drawn raw they are a noise band, not a curve, and they triple the size of a
+self-contained report. So the frames are binned to **one minute** and each bin is plotted as
+its **RMS tracking error in arcseconds**: two series, RA and Dec.
+
+- **RMS is taken about zero, not about each bin's mean.** PHD2's own live graph de-means its
+  RMS, which hides slow drift. Drift across a minute is exactly what a morning report is
+  looking for, so it counts as error here. Say so in the chart's note — the two conventions
+  give different numbers and a reader comparing skyq with PHD2 deserves to know which is which.
+- A bin needs **at least 2 frames** to be plotted. One frame is not an RMS.
+- Raw distances are pixels in the log; the session header's `Pixel scale` converts them. A
+  session with no pixel scale anywhere in its file is dropped, never plotted in pixels.
+- **A dropped frame is not zero error.** Rows whose mount column says `DROP` are frames PHD2
+  discarded — usually a lost star — and they are counted and reported, never averaged in as
+  perfect guiding.
+- **Colours:** RA = `--series-1`, Dec = `--series-2`, for good. Both pass contrast on either
+  surface, and both lines are direct-labelled.
+- **Y axis:** scaled to the 95th percentile of the two series, floor 1.0 arcsec, rounded up to
+  a multiple of **0.4** so four ticks land on exact one-decimal values. Rare spikes clamp at
+  the top, per the geometry rule above; the chart note names the worst minute in full so
+  nothing clamped is lost.
+- **Bands:** the same autofocus bands as the index chart. They sit under the gaps they cause,
+  which is what explains them.
+- **Event rail:** PHD2 errors only (◆, `--warning`). A plate-solve failure is another
+  instrument's problem and already has its tick on the index chart.
+- A night with no guide log gets **no card at all** — never a flat line at zero. Unknown is
+  not perfect (SPEC §8).
+
+---
+
 ## Hover layer
 
 An HTML/SVG chart is interactive by default — ship the hover. Attach `pointermove` to the
@@ -141,6 +186,8 @@ secondary ink.
 
 Clamp the tooltip inside the container so it never causes horizontal overflow. Hide everything
 on `pointerleave`.
+
+Value formatting is per chart: `pct` → `112%`, `lum` → `31.4`, `arcsec` → `0.69″`.
 
 ---
 

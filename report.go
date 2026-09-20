@@ -16,6 +16,7 @@ import (
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/config"
 	"github.com/exploded/skyq/internal/ninalog"
+	"github.com/exploded/skyq/internal/phd2"
 	"github.com/exploded/skyq/internal/publish"
 	"github.com/exploded/skyq/internal/report"
 	"github.com/exploded/skyq/internal/store"
@@ -131,6 +132,16 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		return fmt.Errorf("ingest: %w", err)
 	}
 
+	// PHD2 guiding, over the same window. It answers a different question
+	// from the sky — whether the mount tracked — so a missing guide log
+	// costs the report one card and nothing else.
+	guide := guideNight(cfg.PHD2LogDir, loc, windowStart, windowEnd)
+	guideBins := analysis.GuideBins(guide.Samples, analysis.DefaultGuideBin)
+	guideSummary := analysis.SummariseGuiding(guide, guideBins, onset, hasOnset)
+	if guideSummary.All.N > 0 {
+		log.Printf("PHD2: %d guide frames, %d sessions, RMS %.2f arcsec", guideSummary.All.N, guideSummary.Sessions, guideSummary.All.Total)
+	}
+
 	html, err := report.Render(report.Input{
 		NightOf: night, Frames: res.Frames, Events: events, AFRuns: res.AFRuns,
 		TargetChanges: res.TargetChanges, Samples: samples,
@@ -139,6 +150,7 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		Stills: stills, Untrustworthy: untrust,
 		Flats: res.Flats, FlatExposures: res.FlatExposures, FlatsUnstableSky: flatsUnstable,
 		RoofNote: roofNote, RoofSpans: roof.Spans(),
+		GuideBins: guideBins, Guide: guideSummary,
 	})
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
@@ -173,6 +185,31 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		log.Printf("published %d files to %s:%s", len(files), cfg.Publish.Host, cfg.Publish.Dest)
 	}
 	return nil
+}
+
+// guideNight reads the PHD2 guide logs covering one night's window. Every
+// failure returns an empty result with a log line: guiding is supporting
+// evidence, and no report should fail because PHD2 was not running.
+func guideNight(dir string, loc *time.Location, start, end time.Time) *phd2.Result {
+	if dir == "" {
+		return &phd2.Result{}
+	}
+	logs, err := phd2.FindNightLogs(dir, start, end, loc)
+	if err != nil {
+		log.Printf("no PHD2 guide logs in %s (continuing without guiding): %v", dir, err)
+		return &phd2.Result{}
+	}
+	if len(logs) == 0 {
+		return &phd2.Result{}
+	}
+	res, err := phd2.ParseFiles(logs, loc)
+	if err != nil {
+		log.Printf("PHD2 guide log unreadable (continuing without guiding): %v", err)
+		return &phd2.Result{}
+	}
+	// One guide log can span two nights, so the night's window decides what
+	// belongs to it, not the filename that matched.
+	return res.Clip(start, end)
 }
 
 // skySamples syncs the night's stills into the cache and measures them.

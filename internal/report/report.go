@@ -57,6 +57,13 @@ type Input struct {
 	Flats            []ninalog.FlatFrame
 	FlatExposures    []float64
 	FlatsUnstableSky bool // all-sky volatility crossed the threshold during flats
+
+	// GuideBins is the night's PHD2 guiding, already reduced to per-minute
+	// RMS. Empty when PHD2 wrote no guide log for the night, or the log
+	// directory is not configured — the report is complete without it, so
+	// the guiding card is simply absent.
+	GuideBins []analysis.GuideBin
+	Guide     analysis.GuideSummary
 }
 
 // filterSlots maps filters to their fixed palette slots (CHARTS.md rule 2:
@@ -114,8 +121,21 @@ func otherSeries(frames []ninalog.Frame, baselines map[analysis.BaselineKey]anal
 }
 
 type stat struct{ K, V, Small string }
-type legendItem struct{ Label, Color string }
-type shot struct{ Time, Note string; Src template.URL }
+
+// legendItem is one swatch in a chart legend. Color is template.CSS
+// because html/template's CSS filter rejects a var(--series-1) reference
+// in a style attribute and substitutes ZgotmplZ, which renders as an
+// invisible swatch. The values come from filterSlots and the chart code,
+// never from a log, so declaring them safe is the fix rather than a
+// loophole.
+type legendItem struct {
+	Label string
+	Color template.CSS
+}
+type shot struct {
+	Time, Note string
+	Src        template.URL
+}
 type baselineRow struct {
 	Target, Filter string
 	Median         string
@@ -134,6 +154,10 @@ type pageData struct {
 	Legend           []legendItem
 	IndexChart       template.HTML
 	LumChart         template.HTML
+	GuideChart       template.HTML
+	GuideLegend      []legendItem
+	HasGuide         bool
+	GuideNote        string
 	MultiTarget      bool
 	BaselineModeNote string
 	BaselineFallback string // set when some pair had no clear frames tonight
@@ -176,12 +200,12 @@ func Render(in Input) ([]byte, error) {
 		}
 		if len(pts) > 0 {
 			series = append(series, Series{Name: slot.Label, Label: slot.Filter, Color: slot.Color, Pts: pts})
-			legend = append(legend, legendItem{Label: slot.Label, Color: slot.Color})
+			legend = append(legend, legendItem{Label: slot.Label, Color: template.CSS(slot.Color)})
 		}
 	}
 	if other, ok := otherSeries(in.Frames, in.Baselines, toMin); ok {
 		series = append(series, other)
-		legend = append(legend, legendItem{Label: other.Label, Color: other.Color})
+		legend = append(legend, legendItem{Label: other.Label, Color: template.CSS(other.Color)})
 	}
 
 	var bands []Band
@@ -233,6 +257,8 @@ func Render(in Input) ([]byte, error) {
 		YFmt:      func(v float64) string { return fmt.Sprintf("%.0f", v) },
 	})
 
+	guideChart, guideYMax, guideSeries := renderGuideChart(in, toMin, span, tickOff, tickLabel, bands)
+
 	verdict, stats, eventNote := narrate(in)
 
 	data := pageData{
@@ -242,6 +268,10 @@ func Render(in Input) ([]byte, error) {
 		Legend:           legend,
 		IndexChart:       template.HTML(indexChart),
 		LumChart:         template.HTML(lumChart),
+		GuideChart:       template.HTML(guideChart),
+		GuideLegend:      seriesLegend(guideSeries),
+		HasGuide:         len(in.GuideBins) > 0,
+		GuideNote:        guideNote(in, guideYMax),
 		MultiTarget:      len(in.TargetChanges) > 1,
 		BaselineModeNote: baselineNote(in.BaselineMode),
 		HasOnset:         in.HasOnset,
@@ -258,7 +288,7 @@ func Render(in Input) ([]byte, error) {
 			"at exposure start and the target then being imaged. Frames inside completed autofocus runs are excluded. " +
 			"Still capture times come from the AllSky filenames. All times are local.",
 		CSS:        template.CSS(reportCSS),
-		ChartsJSON: chartsJSON(origin, span, series, lumSeries),
+		ChartsJSON: chartsJSON(origin, span, series, lumSeries, guideSeries, guideYMax),
 		NavTop:     template.HTML(navBlock("top", in.NightOf, "", "")),
 		NavBottom:  template.HTML(navBlock("bottom", in.NightOf, "", "")),
 	}
@@ -268,6 +298,123 @@ func Render(in Input) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// Guide-chart geometry. Taller than the luminance chart by the height of
+// an event rail, so the plot area itself matches (CHARTS.md "The guide
+// chart"). RA and Dec take palette slots 1 and 2 — assigned to those two
+// axes for good, exactly as the filters own their slots on the index
+// chart.
+const (
+	guideChartH    = 224
+	guideRAColor   = "var(--series-1)"
+	guideDecColor  = "var(--series-2)"
+	guideGapMin    = 3   // a break longer than this is a slew, a dither settle or an AF run
+	guideYMaxFloor = 1.0 // arcsec; a quiet night must not get a flattering zoomed axis
+	// guideYStep keeps the axis on round numbers: every multiple of 0.4
+	// divides into four ticks that are exact to one decimal place, which is
+	// how the tick labels are formatted.
+	guideYStep = 0.4
+)
+
+// renderGuideChart draws per-minute RA and Dec RMS over the same x-axis as
+// the other two charts. It returns the markup, the y maximum it chose and
+// the series, which the hover layer needs.
+func renderGuideChart(in Input, toMin func(time.Time) float64, span, tickOff float64, tickLabel func(float64) string, bands []Band) (string, float64, []Series) {
+	if len(in.GuideBins) == 0 {
+		return "", 0, nil
+	}
+	var raPts, decPts []Pt
+	for _, b := range in.GuideBins {
+		m := toMin(b.At)
+		raPts = append(raPts, Pt{M: m, V: b.RARMS})
+		decPts = append(decPts, Pt{M: m, V: b.DecRMS})
+	}
+	series := []Series{
+		{Name: "RA RMS", Label: "RA", Color: guideRAColor, Pts: raPts},
+		{Name: "Dec RMS", Label: "Dec", Color: guideDecColor, Pts: decPts},
+	}
+
+	// Only PHD2's own failures belong on this rail. A plate-solve failure is
+	// a different instrument's problem and already has its tick on the
+	// index chart.
+	var marks []EventMark
+	for _, e := range in.Events {
+		if e.Kind == ninalog.PHD2Error {
+			marks = append(marks, EventMark{M: toMin(e.At), Kind: "phd"})
+		}
+	}
+
+	yMax := guideYMax(in.GuideBins)
+	opts := ChartOpts{
+		H: guideChartH, YMax: yMax, YTicks: 4, GapMin: guideGapMin,
+		YLabel: "RMS guide error (arcsec)", Rail: true,
+		SpanMin: span, TickStart: tickOff, TickLabel: tickLabel,
+		Bands: bands, Events: marks,
+		YFmt: func(v float64) string { return fmt.Sprintf("%.1f", v) },
+	}
+	if in.Guide.All.N > 0 {
+		ref := in.Guide.All.Total
+		opts.Ref = &ref
+		opts.RefLabel = fmt.Sprintf("night RMS %.2f″", ref)
+	}
+	return RenderChart(series, opts), yMax, series
+}
+
+// seriesLegend turns a chart's series into legend items, so a chart's
+// colours are decided once, in Go, and never restated in the template.
+func seriesLegend(series []Series) []legendItem {
+	var out []legendItem
+	for _, s := range series {
+		out = append(out, legendItem{Label: s.Name, Color: template.CSS(s.Color)})
+	}
+	return out
+}
+
+// guideYMax picks an axis that shows the night's ordinary guiding rather
+// than one bad minute. It scales to the 95th percentile of the two series
+// and lets the rare spike clamp at the top of the plot, which CHARTS.md
+// prefers to an axis stretched by an outlier. The verdict always states the
+// worst minute in full, so nothing clamped is lost.
+func guideYMax(bins []analysis.GuideBin) float64 {
+	var vals []float64
+	for _, b := range bins {
+		vals = append(vals, math.Max(b.RARMS, b.DecRMS))
+	}
+	sort.Float64s(vals)
+	p95 := math.Max(vals[(len(vals)*95)/100], guideYMaxFloor)
+	return math.Ceil(p95/guideYStep) * guideYStep
+}
+
+// guideNote is the sentence under the guide chart's heading. It says where
+// the numbers came from, and warns when the axis is clamping.
+func guideNote(in Input, yMax float64) string {
+	if len(in.GuideBins) == 0 {
+		return ""
+	}
+	g := in.Guide
+	var b strings.Builder
+	fmt.Fprintf(&b, "RMS tracking error per minute from the PHD2 guide log, taken about zero rather than about each minute's mean, "+
+		"so slow drift counts as error. %d guide frames over %s of guiding in %d sessions; "+
+		"the gaps are slews, dither settles and autofocus runs, when PHD2 was not guiding.",
+		g.All.N, roundedHours(g.Duration), g.Sessions)
+	if g.Dropped > 0 {
+		fmt.Fprintf(&b, " PHD2 discarded %d further frames — usually a lost star.", g.Dropped)
+	}
+	if g.Worst.Total > yMax {
+		fmt.Fprintf(&b, " The worst minute (%.2f″ at %s) is clamped at the top of the plot.",
+			g.Worst.Total, g.Worst.At.Format("15:04"))
+	}
+	return b.String()
+}
+
+// roundedHours renders a duration the way the prose does — "4.2 h", or
+// minutes when there is less than an hour of it.
+func roundedHours(d time.Duration) string {
+	if d < time.Hour {
+		return fmt.Sprintf("%d min", int(d.Minutes()+0.5))
+	}
+	return fmt.Sprintf("%.1f h", d.Hours())
 }
 
 func chartSpan(in Input) (time.Time, float64) {
@@ -288,6 +435,12 @@ func chartSpan(in Input) (time.Time, float64) {
 	}
 	for _, e := range in.Events {
 		seen(e.At)
+	}
+	// Guiding often starts before the first light frame and can outlast the
+	// last one. All three charts share one coordinate system, so the span
+	// has to cover it too or the guide chart loses its early minutes.
+	for _, b := range in.GuideBins {
+		seen(b.At)
 	}
 	if lo.IsZero() {
 		lo = time.Now()
@@ -440,6 +593,13 @@ func narrate(in Input) (string, []stat, string) {
 			stat{K: "Failures", V: fmt.Sprintf("%d", failures), Small: "solve + PHD2"},
 		)
 	}
+	if in.Guide.All.N > 0 {
+		stats = append(stats, stat{
+			K: "Guide RMS", V: fmt.Sprintf("%.2f″", in.Guide.All.Total),
+			Small: fmt.Sprintf("RA %.2f · Dec %.2f", in.Guide.All.RA, in.Guide.All.Dec),
+		})
+	}
+	v.WriteString(guideSentence(in))
 	for _, r := range in.Untrustworthy {
 		fmt.Fprintf(&v, "The %s autofocus run fitted its curve on almost no stars and should not be trusted. ", r.Start.Format("15:04"))
 	}
@@ -452,6 +612,30 @@ func narrate(in Input) (string, []stat, string) {
 		note = "Only the post-slew event predates the cloud — PHD2 failing to settle on a new guide star after a slew, not a sky problem."
 	}
 	return v.String(), stats, note
+}
+
+// guideSentence puts the night's guiding in the verdict. Guiding is not
+// transparency, but it is the other thing that quietly ruins subs, and a
+// night whose tracking only fell apart after the cloud arrived answers the
+// report's question in one line.
+func guideSentence(in Input) string {
+	g := in.Guide
+	if g.All.N == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if g.HasSplit {
+		fmt.Fprintf(&b, "Guiding ran at %.2f″ RMS before the cloud and %.2f″ after",
+			g.Before.Total, g.After.Total)
+	} else {
+		fmt.Fprintf(&b, "Guiding held at %.2f″ RMS (RA %.2f″, Dec %.2f″) over %s",
+			g.All.Total, g.All.RA, g.All.Dec, roundedHours(g.Duration))
+	}
+	if g.Worst.N > 0 {
+		fmt.Fprintf(&b, "; the worst minute was %.2f″ at %s", g.Worst.Total, g.Worst.At.Format("15:04"))
+	}
+	b.WriteString(". ")
+	return b.String()
 }
 
 // flatsSentence summarises the morning sky-flats session for the verdict.
@@ -598,7 +782,7 @@ type seriesJSON struct {
 	Pts   []Pt   `json:"pts"`
 }
 
-func chartsJSON(origin time.Time, span float64, index, lum []Series) template.JS {
+func chartsJSON(origin time.Time, span float64, index, lum, guide []Series, guideYMax float64) template.JS {
 	o := float64(origin.Hour()*60 + origin.Minute())
 	mk := func(ss []Series) []seriesJSON {
 		out := make([]seriesJSON, 0, len(ss))
@@ -616,6 +800,10 @@ func chartsJSON(origin time.Time, span float64, index, lum []Series) template.JS
 	charts := []chartJSON{
 		{Svg: "c1", Box: "b1", Tip: "t1", H: 320, Rail: true, YMax: 200, Span: span, Origin: o, Fmt: "pct", Series: mk(index)},
 		{Svg: "c2", Box: "b2", Tip: "t2", H: 210, Rail: false, YMax: lumYM, Span: span, Origin: o, Fmt: "lum", Series: mk(lum)},
+	}
+	if len(guide) > 0 {
+		charts = append(charts, chartJSON{Svg: "c3", Box: "b3", Tip: "t3", H: guideChartH, Rail: true,
+			YMax: guideYMax, Span: span, Origin: o, Fmt: "arcsec", Series: mk(guide)})
 	}
 	j, err := json.Marshal(charts)
 	if err != nil {

@@ -85,9 +85,14 @@ skyq/
 │   ├── scan.go               # walk the local cache, parse filename timestamps
 │   ├── luminance.go          # pure — operates on an io.Reader/bytes, no network
 │   └── luminance_test.go
-├── internal/analysis/        # normalisation, baselines, cloud detection
+├── internal/phd2/            # PHD2 guide-log parser — pure, like ninalog
+│   ├── parse.go
+│   ├── types.go
+│   └── parse_test.go
+├── internal/analysis/        # normalisation, baselines, cloud detection, guiding
 │   ├── index.go
 │   ├── cloud.go
+│   ├── guide.go
 │   └── index_test.go
 ├── internal/store/           # sqlc-generated code + migrations
 │   ├── migrations/
@@ -104,10 +109,11 @@ skyq/
 │   └── reference-report.html
 └── testdata/
     ├── 20260902.log          # the validated fixture — see §9
+    ├── phd2-guidelog.txt     # a small guide log in the real format — see §4.6
     └── stills/               # a handful of real stills
 ```
 
-`ninalog`, `allsky` and `analysis` must have **no dependency on the store or the web
+`ninalog`, `phd2`, `allsky` and `analysis` must have **no dependency on the store or the web
 layer**. They are the reusable core and they are where the tests live.
 
 ---
@@ -337,6 +343,48 @@ Classify each failure so the report says something useful rather than listing er
 
 ---
 
+### 4.6 PHD2 guiding
+
+Guiding is the night's other failure mode, and the guide log is already on the NUC. PHD2
+writes it to `%USERPROFILE%\Documents\PHD2\PHD2_GuideLog_YYYY-MM-DD_HHMMSS.txt` (config key
+`phd2_log_dir`), one file per launch, containing a repeating header-plus-CSV block:
+
+```
+Guiding Begins at 2026-09-02 20:52:49
+Pixel scale = 0.69 arc-sec/px, Binning = 1, Focal length = 1200 mm
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,...
+1,6.227,"Mount",0.458,1.028,0.304,1.116,...
+Guiding Ends at 2026-09-02 21:04:05
+```
+
+Rules the parser must keep:
+
+- **Read columns by name, never by position.** PHD2's log version has added columns over the
+  years and will again. A calibration block writes its own CSV header with no
+  `RARawDistance`, which is how those rows get rejected.
+- `Time` is seconds since that block's `Guiding Begins`, not since the file opened.
+- Raw distances are **pixels**; the block's own `Pixel scale` converts them to arcseconds. A
+  header that omits it inherits the file's last known scale; a file with none anywhere yields
+  no samples rather than a plot in the wrong unit.
+- **`mount` = `DROP` is a discarded frame**, not a measurement of zero error. Count it and
+  report it. On the validated night PHD2 dropped 1,227 frames against 3,001 kept.
+- A file that ends without `Guiding Ends` — a crash, or a live tail — closes its last session
+  at its last sample, never at the end of the night.
+- One file can span two nights: the night's noon-to-noon window decides what belongs to it,
+  not the filename that matched.
+
+Reduction for the report (see `design/CHARTS.md`, "The guiding chart"): bin to one minute and
+take each bin's **RMS about zero** — not about the bin's mean, as PHD2's live graph does,
+because slow drift across a minute is error the morning report wants to see. Bins with fewer
+than two frames are dropped.
+
+Guiding is **supporting evidence, not an input to the index**. Nothing here may change a
+transparency number, and a night with no guide log must produce the same report it produced
+before, minus one card. On the validated night the split either side of the cloud onset —
+0.85 arcsec RMS before, 2.40 after — corroborates the all-sky camera from a third instrument.
+
+---
+
 ## 5. Data model
 
 SQLite. Migrations in `internal/store/migrations`, queries in `internal/store/queries`,
@@ -409,7 +457,8 @@ You will re-run this while developing and you must not end up with doubled frame
 `skyq report [--night 2026-09-02]` — defaults to the night that just ended.
 
 1. Locate the log for that night in `%LOCALAPPDATA%\NINA\Logs\`, hash it, ingest frames
-   and events.
+   and events. Read the night's PHD2 guide logs over the same window (§4.6); a missing
+   directory is a log line, never an error.
 2. Sync last night's stills from `allsky.local` into the local cache (skip files already
    present), then compute luminance samples and detect cloud onset.
 3. Compute or load baselines, populate `index_pct`.
@@ -435,14 +484,16 @@ Report contents, in order:
 2. Transparency index over time, one line per filter, with a dashed 100 baseline, autofocus
    bands shaded, target changes marked, failures as ticks on the base.
 3. All-sky luminance over the same x-axis.
-4. All-sky thumbnails at the interesting moments — onset, worst, any recovery.
-5. Baseline table (the divisors — makes the index auditable).
-6. Event timeline with attributed causes.
-7. Collapsed raw frame table.
+4. PHD2 guiding over the same x-axis — per-minute RA and Dec RMS, autofocus bands, PHD2
+   errors on the rail. Absent entirely on a night with no guide log.
+5. All-sky thumbnails at the interesting moments — onset, worst, any recovery.
+6. Baseline table (the divisors — makes the index auditable).
+7. Event timeline with attributed causes.
+8. Collapsed raw frame table.
 
-Charting: **inline SVG generated in Go**, no JS charting library. The data is small (order 100
-points) and a self-contained file is the point. Two separate charts sharing an x-axis —
-never a dual y-axis.
+Charting: **inline SVG generated in Go**, no JS charting library. A self-contained file is the
+point, so anything with thousands of points is reduced before it is plotted, never thinned by
+dropping data. Separate charts sharing one x-axis — never a dual y-axis.
 
 ### Getting the look right
 

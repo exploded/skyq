@@ -1,0 +1,29 @@
+PHD2 version 2.6.14 [Windows], Log version 2.5. Log enabled at 2026-09-02 20:40:38
+INFO: Guiding parameter change, MultiStar = true
+
+Guiding Begins at 2026-09-02 21:00:00
+Equipment Profile = AT12IN
+Dither = both axes, Dither scale = 1.000, Image noise reduction = none, Guide-frame time lapse = 0, Server enabled
+Pixel scale = 2.00 arc-sec/px, Binning = 1, Focal length = 1200 mm
+Search region = 15 px, Star mass tolerance = 50.0%, Multi-star mode, list size = 8
+Exposure = 5000 ms
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+1,0.000,"Mount",0.400,0.300,0.500,0.000,0.000,0.000,0,,0,,,,73195,20.00,0
+INFO: SETTLING STATE CHANGE, Settling complete
+2,10.000,"Mount",0.100,0.200,-0.500,0.400,0.000,0.000,0,,0,,,,73195,21.00,0
+3,20.000,"DROP",,,,,,,,,,,,,199288,4.20,7,"Star lost - mass changed"
+4,30.000,"Mount",0.000,0.000,0.500,-0.400,0.000,0.000,0,,0,,,,73195,22.00,0
+Guiding Ends at 2026-09-02 21:01:00
+
+Calibration Begins at 2026-09-02 21:02:00
+Dir,Step,dx,dy,x,y,Dist
+West,1,0.000,0.000,100.000,100.000,0.000
+West,2,5.000,0.000,105.000,100.000,5.000
+Calibration Ends at 2026-09-02 21:03:00
+
+Guiding Begins at 2026-09-02 21:10:00
+Equipment Profile = AT12IN
+Exposure = 5000 ms
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+1,0.000,"Mount",1.000,1.000,1.000,1.000,0.000,0.000,0,,0,,,,73195,30.00,0
+2,30.000,"Mount",1.000,1.000,-1.000,-1.000,0.000,0.000,0,,0,,,,73195,31.00,0

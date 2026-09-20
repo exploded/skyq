@@ -11,6 +11,7 @@ import (
 	"github.com/exploded/skyq/internal/allsky"
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/ninalog"
+	"github.com/exploded/skyq/internal/phd2"
 )
 
 // The embedded stylesheet must stay byte-identical to the design source of
@@ -248,5 +249,160 @@ func TestRenderLRGBNight(t *testing.T) {
 	// one marker per light frame plus one hover halo per chart
 	if got := strings.Count(page, "<circle "); got != len(frames)+2 {
 		t.Errorf("index chart markers = %d, want %d", got-2, len(frames))
+	}
+}
+
+// guideFixture reads the committed PHD2 log and reduces it the way the
+// report run does.
+func guideFixture(t *testing.T) ([]analysis.GuideBin, analysis.GuideSummary) {
+	t.Helper()
+	f, err := os.Open("../../testdata/phd2-guidelog.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	res, err := phd2.Parse(f, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bins := analysis.GuideBins(res.Samples, analysis.DefaultGuideBin)
+	return bins, analysis.SummariseGuiding(res, bins, time.Time{}, false)
+}
+
+func guideNightInput(t *testing.T) Input {
+	t.Helper()
+	bins, summary := guideFixture(t)
+	base := map[analysis.BaselineKey]analysis.Baseline{
+		{Target: "NGC 2070", Filter: "H"}: {MedianStars: 800, NFrames: 4, Source: analysis.SourceSelf},
+	}
+	var frames []ninalog.Frame
+	at := time.Date(2026, 9, 2, 21, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		frames = append(frames, ninalog.Frame{
+			At: at.Add(time.Duration(i) * 5 * time.Minute), ExposureSec: 300,
+			Filter: "H", Target: "NGC 2070", DetectedStars: 790,
+		})
+	}
+	return Input{
+		NightOf: "2026-09-02", Frames: frames, Baselines: base, BaselineMode: "self",
+		GuideBins: bins, Guide: summary,
+	}
+}
+
+// The guiding card plots RA and Dec RMS on their own fixed palette slots,
+// states the night's RMS, and carries its own hover chart.
+func TestRenderGuideChart(t *testing.T) {
+	html, err := Render(guideNightInput(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, want := range []string{
+		"PHD2 guiding",
+		"RMS guide error (arcsec)",
+		`id="c3"`, `id="b3"`, `id="t3"`,
+		`"fmt":"arcsec"`,
+		guideRAColor, guideDecColor,
+		">RA<", ">Dec<",
+		"night RMS",
+		"Guide RMS", // the stat tile
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("guiding report missing %q", want)
+		}
+	}
+	// Two bins, two series, plus one hover halo per chart.
+	if got, want := strings.Count(page, "<circle "), 2*2+4+3; got != want {
+		t.Errorf("markers = %d, want %d", got, want)
+	}
+}
+
+// A night PHD2 never ran still gets a full report — the card is simply
+// absent. Unknown guiding is never drawn as zero error (SPEC §8).
+func TestRenderWithoutGuiding(t *testing.T) {
+	in := guideNightInput(t)
+	in.GuideBins, in.Guide = nil, analysis.GuideSummary{}
+	html, err := Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, unwanted := range []string{"PHD2 guiding", `id="c3"`, "Guide RMS", `"fmt":"arcsec"`} {
+		if strings.Contains(page, unwanted) {
+			t.Errorf("report with no guide log still rendered %q", unwanted)
+		}
+	}
+}
+
+// Guiding usually starts before the first light frame. All three charts
+// share one x-axis, so the span has to reach back far enough to show it.
+func TestGuideBinsWidenTheChartSpan(t *testing.T) {
+	in := guideNightInput(t)
+	in.Frames[0].At = time.Date(2026, 9, 2, 22, 0, 0, 0, time.UTC)
+	for i := range in.Frames {
+		in.Frames[i].At = in.Frames[0].At.Add(time.Duration(i) * 5 * time.Minute)
+	}
+	origin, _ := chartSpan(in)
+	if origin.After(in.GuideBins[0].At) {
+		t.Errorf("chart origin %s starts after the first guide bin %s", origin, in.GuideBins[0].At)
+	}
+}
+
+// TestPreviewGuidingNight renders the validated night with its real PHD2
+// guide log and leaves the result in .local for eyeballing — CHARTS.md:
+// do not ship a chart you have not looked at. The log is not committed, so
+// the test skips without it.
+func TestPreviewGuidingNight(t *testing.T) {
+	loc := time.UTC
+	from := time.Date(2026, 9, 2, 12, 0, 0, 0, loc)
+	logs, err := phd2.FindNightLogs("../../.local/PHD2", from, from.Add(24*time.Hour), loc)
+	if err != nil || len(logs) == 0 {
+		t.Skip("no .local/PHD2 guide log for 2026-09-02; skipping preview")
+	}
+	guide, err := phd2.ParseFiles(logs, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide = guide.Clip(from, from.Add(24*time.Hour))
+
+	f, err := os.Open("../../testdata/20260902.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	res, err := ninalog.Parse(f, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onset := time.Date(2026, 9, 3, 3, 48, 0, 0, loc)
+	bins := analysis.GuideBins(guide.Samples, analysis.DefaultGuideBin)
+	summary := analysis.SummariseGuiding(guide, bins, onset, true)
+	t.Logf("guiding: %d frames, %d sessions, RMS %.2f arcsec, worst minute %.2f at %s",
+		summary.All.N, summary.Sessions, summary.All.Total, summary.Worst.Total, summary.Worst.At.Format("15:04"))
+
+	html, err := Render(Input{
+		NightOf:       "2026-09-02",
+		Frames:        res.Frames,
+		Events:        analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, true),
+		AFRuns:        res.AFRuns,
+		TargetChanges: res.TargetChanges,
+		Samples:       referenceLumSeries(t),
+		Onset:         onset,
+		HasOnset:      true,
+		Baselines:     analysis.Baselines(res.Frames, onset, true),
+		BaselineMode:  "self",
+		Flats:         res.Flats,
+		FlatExposures: res.FlatExposures,
+		GuideBins:     bins,
+		Guide:         summary,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `viewBox="0 0 940 224"`) {
+		t.Error("guide chart missing from a night with a guide log")
+	}
+	if err := os.WriteFile("../../.local/preview-report-guiding.html", html, 0o644); err == nil {
+		t.Logf("preview written to .local/preview-report-guiding.html (%d KB)", len(html)/1024)
 	}
 }
