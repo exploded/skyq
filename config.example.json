@@ -19,7 +19,7 @@
   "openweathermap_api_key": "",
   "publish": {
     "enabled": false,
-    "host": "172.105.178.43",
+    "host": "194.195.254.92",
     "port": 2222,
     "user": "deploy",
     "dest": "/var/www/deepspaceplace/reports",

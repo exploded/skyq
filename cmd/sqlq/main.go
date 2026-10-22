@@ -4,9 +4,9 @@
 // read-only unless -write is given; with -write each argument is executed
 // and its affected row count printed.
 //
-//	go run ./cmd/sqlq -db C:\skyq\skyq.db
-//	go run ./cmd/sqlq -db C:\skyq\skyq.db "SELECT * FROM nights"
-//	go run ./cmd/sqlq -db C:\skyq\skyq.db -write "DELETE FROM baselines WHERE ..."
+//	go run ./cmd/sqlq -db C:\apps\skyq\skyq.db
+//	go run ./cmd/sqlq -db C:\apps\skyq\skyq.db "SELECT * FROM nights"
+//	go run ./cmd/sqlq -db C:\apps\skyq\skyq.db -write "DELETE FROM baselines WHERE ..."
 package main
 
 import (
