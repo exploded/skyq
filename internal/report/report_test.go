@@ -271,7 +271,7 @@ func TestRenderLuminanceCarriedForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := string(html)
-	for _, want := range []string{"Cloud arrived at 01:00", "retired luminance detector", "luminance, carried forward"} {
+	for _, want := range []string{"Cloud arrived at 01:00", "retired luminance detector", "<small>&middot; luminance</small>"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("report missing %q", want)
 		}

@@ -726,10 +726,12 @@ func cloudNote(in Input, plotted bool) string {
 	return b.String()
 }
 
-// onsetSource is the stat row's caption on the onset.
+// onsetSource is the stat row's caption on the onset: one word, so it sits
+// beside the time instead of wrapping under it. The cloud card's note says
+// a luminance onset was carried forward.
 func onsetSource(src analysis.CloudSource) string {
 	if src == analysis.CloudLuminance {
-		return "luminance, carried forward"
+		return "luminance"
 	}
 	return "skycam"
 }
