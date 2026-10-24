@@ -1,33 +1,48 @@
 # skyq
 
-Sky transparency analyser for the observatory. Parses each night's N.I.N.A.
-log and the all-sky camera's stills, computes a normalised transparency
-index (star counts per target × filter against a clear-sky baseline),
-detects cloud onset independently of N.I.N.A., attributes failures to their
-causes, charts the night's PHD2 guiding alongside it, and writes a
-self-contained HTML morning report.
+Imaging analysis for the observatory. skyq parses each night's N.I.N.A. log,
+computes a normalised transparency index (star counts per target × filter
+against a clear-sky baseline), attributes failures to their causes, charts
+the night's PHD2 guiding, and writes a self-contained HTML morning report.
+
+The sky itself belongs to [skycam](https://github.com/exploded/skycam), which
+runs on the observatory Pi at allsky.local. skyq reads each night's cloud
+cover, cloud onset and roof state from skycam's sky API, and pulls the
+report's thumbnails from its `/images/` folder.
 
 See `SPEC.md` for the full design and the validated acceptance numbers.
+
+## What runs where
+
+| Machine | Program | Owns |
+|---|---|---|
+| Pi (allsky.local) | skycam | The sky: capture, cloud, onset, roof state, the live view, and the Alpaca weather device N.I.N.A. reads |
+| NUC | skyq | Imaging: what got through, the transparency index, failure attribution, autofocus and guiding |
+| Linode | deepspaceplace.com | The published reports |
 
 ## Commands
 
 ```
 skyq report    [--night 2026-09-02]   analyse one night, write + publish the report
-skyq backfill  [--nights 30]          run report for recent nights with logs
-skyq calibrate [--night 2026-09-02]   suggest a volatility threshold from a clear night
-skyq serve                            Phase 2 live monitor (Alpaca device + live page)
+skyq backfill  [--nights 30] [--rerun] report recent nights whose log is new or changed
 ```
 
 All commands take `--config config.json` (default `./config.json`).
 
+`backfill` skips a night already ingested from the same log, so it never
+re-renders and republishes an old report for nothing. Pass `--rerun` to run
+those nights again, for example after a change to the report.
+
 ## Setup on the NUC
 
 1. Build: `go build` (the main package lives at the repo root)
-2. `copy config.example.json config.json` and fill in the paths and
-   coordinates (`config.json` is gitignored — never commit it). The AllSky
-   `/images/` listing is open HTTP; if it ever gains Basic auth, add
-   `allsky_username` / `allsky_password` back to config.json.
-   `phd2_log_dir` may be left empty: it defaults to PHD2's own
+2. `copy config.example.json config.json` and fill in the paths
+   (`config.json` is gitignored — never commit it).
+   - `allsky_username` and `allsky_password` are skycam's `images_user` and
+     `images_password`. The same Basic auth covers `/images/` and the sky API.
+   - `skycam_url` may be left empty: it defaults to the scheme and host of
+     `allsky_base_url`, which is where skycam runs.
+   - `phd2_log_dir` may be left empty: it defaults to PHD2's own
    `%USERPROFILE%\Documents\PHD2`. Set it if PHD2 writes its guide logs
    elsewhere; a directory that is not there costs the report its guiding
    chart and nothing else.
@@ -46,43 +61,44 @@ All commands take `--config config.json` (default `./config.json`).
    folder — templates and styles are embedded in the binary, and `cache\`,
    `skyq.db` and `reports\` are created next to it.
 
-## Live monitor (Phase 2)
+## Cloud and roof from skycam
 
-`skyq serve` runs all night: it polls allsky.local for new stills (shared
-cache with the morning report), gates cloud detection on astronomical
-darkness (set `latitude`/`longitude` in config) and data freshness, tails
-tonight's N.I.N.A. log for a live transparency index, and exposes:
+Each `report` run asks skycam for the night:
+`GET http://allsky.local/api/nights/<YYYYMMDD>/sky`. The reply gives each
+frame's cloud cover and roof state, plus the cloud onset. skyq uses the onset
+as given, so the onset rule lives in skycam alone.
 
-- **Alpaca ObservingConditions** on `alpaca_addr` (default `:11112`).
-  N.I.N.A. finds it by standard Alpaca UDP discovery: skyq and
-  alpaca-switch share port 32227 with SO_REUSEADDR (per the Alpaca spec —
-  needs an alpaca-switch build from 2026-09-03 or later; with an older
-  build skyq logs a warning and only auto-discovery is lost). Discovery
-  replies carry the machine's LAN address, so the API binds all
-  interfaces, not loopback. Sensors: CloudCover
-  (volatility vs threshold, %), SkyBrightness (instrumental luminance),
-  SkyQuality (live transparency index), TimeSinceLastUpdate. Stale or
-  twilight readings answer with an Alpaca error — unknown never reads as
-  clear — and everything is advisory: this is never a SafetyMonitor and
-  nothing here may gate the roof.
-- **Live page** on `live_addr` (default `:8996`, LAN — expect one Windows
-  Firewall prompt): current state, sparkline, latest still, tonight's
-  events. Read-only; refreshes every 30 s.
+- **Cloud unknown.** If skycam returns 404, the Pi can't be reached, or no
+  frame in the imaging session has a cloud reading, the night's cloud is
+  unknown. The report says so, attributes no failure to cloud, and stores no
+  clear-sky baselines from it. Unknown is never read as clear.
+- **Gaps in a known night.** A failure after the onset is blamed on cloud
+  only if skycam had a cloud reading within 5 minutes of it. skycam has no
+  reading while the roof isn't open, while the sun is above −12°, or for the
+  first ten minutes or so of a session.
+- **Nights already on record** keep their stored cloud verdict if skycam has
+  nothing for them. Every night before skycam has an onset from skyq's
+  retired luminance detector, and that onset carries forward.
+- **Roof bands.** The report hatches the stretches skycam's roll-off
+  controller reported the roof as CLOSED, OPENING, CLOSING or ERROR. For a
+  night skycam can't serve, the bands fall back to N.I.N.A.'s `DomeVM.cs`
+  lines. Those lines miss a roof opened by hand.
+- **Thumbnails.** skycam keeps stills for 14 nights and frame rows for a
+  year. A thumbnail whose still has gone is left out of the report. Stills
+  that skyq fetches are kept in `cache/YYYYMMDD/`.
 
-N.I.N.A. connects one weather device at a time, so switching it from
-OpenWeatherMap to skyq would normally drop temperature, humidity,
-pressure, dew point and wind from the FITS headers. Set
-`openweathermap_api_key` (the same key N.I.N.A. uses) and skyq passes
-those through: it polls OpenWeatherMap every 10 minutes and serves the
-ambient sensors alongside its own sky signals. OpenWeatherMap's cloud
-cover is deliberately ignored — the all-sky volatility is the cloud
-signal. With no key, the ambient sensors report not-implemented and
-N.I.N.A. greys them out.
+### N.I.N.A.'s weather device
 
-Task Scheduler: schedule `run-serve.bat` at startup with
-"restart the task if it fails" enabled, same user as N.I.N.A.
-Gating in sequences: use Sequencer Powerups weather expressions (e.g.
-`If CloudCover > 80` → skip autofocus) — skyq only reports.
+N.I.N.A. already reads skycam's Alpaca ObservingConditions device at
+allsky.local:11111. Its `SkyQuality` is skycam's approximate sky brightness
+in mag/arcsec², not skyq's transparency index. skyq no longer runs a
+weather device or a live page.
+
+alpaca-switch no longer needs to share UDP discovery port 32227 with skyq.
+The shareable bind it gained on 2026-09-03 does no harm, so it can stay.
+
+Disable the old Task Scheduler task for `skyq serve` on the NUC. The
+`serve` subcommand and `run-serve.bat` are gone.
 
 ## Publishing
 
@@ -91,7 +107,9 @@ Every report carries previous/next-night links and a link back to
 line. Both are rebuilt after each run: neighbouring reports are relinked in
 place, and any that changed are uploaded along with the new report and the
 index. Reports rendered before navigation existed have no link slots — run
-`skyq backfill` to regenerate them.
+`skyq backfill --rerun` to regenerate them. That re-renders every night in
+range, so nights before skycam lose their luminance chart; their onsets are
+kept.
 
 With `publish.enabled: true`, the finished report, the regenerated index
 and any relinked neighbours are copied by `scp` (OpenSSH, `BatchMode`) to
@@ -115,12 +133,15 @@ never blocks the local report. One-time setup on the machine that runs skyq:
 
 ## Data
 
-- SQLite database (`skyq.db`) accumulates frames, events, sky samples and
-  baselines so the index becomes comparable across nights once ≥ 5 clear
-  nights exist for a target × filter pair.
-- Stills are cached under `cache/YYYYMMDD/` and can be pruned freely;
-  derived samples live in the database.
+- SQLite database (`skyq.db`) accumulates frames, events and baselines so
+  the index becomes comparable across nights once ≥ 5 clear nights exist for
+  a target × filter pair. `nights.cloud_source` records where each night's
+  onset came from: `skycam`, `luminance` (before skycam) or `unknown`.
+- `legacy_sky_samples` holds the per-still luminance from before skycam,
+  keyed by night. Nothing reads it; it is kept so no data was lost in the
+  switch.
+- Stills are cached under `cache/YYYYMMDD/` and can be pruned freely.
 - PHD2 guide logs are read straight from `phd2_log_dir` each run and nothing
   from them is stored. A report only shows the guiding of a night whose
-  guide log is still on disk, so `skyq backfill` reaches back exactly as far
-  as PHD2's own log retention allows.
+  guide log is still on disk, so `skyq backfill --rerun` reaches back exactly
+  as far as PHD2's own log retention allows.

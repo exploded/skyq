@@ -14,16 +14,16 @@ validated — every algorithm and threshold below was checked against real data,
 gives the exact numbers to test against. This spec is the port of that prototype to a
 maintainable Go program.
 
-Two phases:
+skyq is the **morning report**: batch. Parse last night's N.I.N.A. and PHD2 logs, read the
+night's cloud from skycam, write an HTML report, and store everything in SQLite so baselines
+improve over time.
 
-- **Phase 1 — morning report.** Batch. Parse last night's N.I.N.A. log plus the all-sky
-  stills, write an HTML report, store everything in SQLite so baselines improve over time.
-- **Phase 2 — live transparency monitor.** Compute the same metric during the night from
-  stills as they land, expose it as an ASCOM Alpaca ObservingConditions device so N.I.N.A.
-  can skip work that is going to fail.
-
-Phase 1 first. Phase 2 reuses its parsing and baseline layers, so factor them as packages
-from the start, not as a `main.go` monolith.
+**The sky belongs to skycam** (`exploded/skycam`), the all-sky camera software on the
+observatory Pi at `allsky.local`. Since 2026-10-24 it measures cloud from each frame's star
+count, knows the roof state from the roll-off controller, finds the cloud onset, serves the
+live view, and runs the ASCOM Alpaca ObservingConditions device N.I.N.A. reads. skyq's
+former Phase 2 — a live monitor with its own Alpaca device — moved there and is gone from
+this repo (§7).
 
 ---
 
@@ -35,38 +35,35 @@ from the start, not as a `main.go` monolith.
 | **Language** | Go |
 | **Storage** | SQLite via modernc/sqlite (pure Go, no cgo), queries via [sqlc](https://sqlc.dev/) |
 | **Web** | `html/template` + HTMX (self-hosted, no CDN) |
-| **All-sky stills** | On `allsky.local` (Debian box running AllSky), `~/allsky/images/YYYYMMDD/image-YYYYMMDDHHMMSS.jpg` — skyq pulls them over the LAN and caches locally. **The camera is inside the observatory**, under the roll-off roof: with the roof shut it measures the roof (§4.4) |
+| **Sky data** | skycam on `allsky.local` (the observatory Pi): `GET /api/nights/<YYYYMMDD>/sky` for cloud, onset and roof per frame, and `/images/YYYYMMDD/image-YYYYMMDDHHMMSS.jpg` for stills, both behind the same HTTP Basic auth (§4.4) |
 | **N.I.N.A. log** | Local file, `%LOCALAPPDATA%\NINA\Logs\` — open read-only |
-| **Service mgmt** | Windows Task Scheduler: daily task at 09:00 for `skyq report`, at-startup task with restart-on-failure for `skyq serve` |
+| **Service mgmt** | Windows Task Scheduler: daily task at 09:00 for `skyq report` |
 | **Publishing** | Finished reports pushed to the Linode, served at deepspaceplace.com (already behind Caddy) |
 
 Running on the NUC makes the N.I.N.A. log a local read — the most awkward transport problem
-in the prototype disappears — and puts the Phase 2 Alpaca device on the same machine as its
-only consumer. The capture time of each still is in the filename, so no video timing
-calibration is needed regardless of how the stills arrive.
+in the prototype disappears.
 
-**Getting the stills to the NUC.** Pull directly from `allsky.local`, not via S3 (AllSky's
-S3 upload only carries keograms, star trails and videos, and adding stills would cost upload
-latency that Phase 2 can't afford). Preferred: HTTP from the AllSky web server, which already
-serves the images directory; fallback: a read-only SMB export of `~/allsky/images`. Verify
-which is exposed on the real box before coding. `http://allsky.local/images/` is (and should
-stay) password protected — the fetcher sends HTTP Basic auth on every request, with the
-credentials in skyq's config file, never in the repo. Fetched stills land in a local cache
-directory on the NUC; derived samples outlive the cache (§10).
+**Getting the sky to the NUC.** skyq asks skycam for one night at a time over the LAN. The
+night date is allsky's: frames before noon belong to the previous evening, the same
+convention as skyq's night-of. `http://allsky.local/images/` and the sky API are (and should
+stay) password protected — the client sends HTTP Basic auth on every request, with the
+credentials in skyq's config file, never in the repo. skyq fetches only the stills the
+report shows as thumbnails, into a local cache on the NUC. skycam keeps frame rows for 365
+days but deletes the JPEGs after 14 nights, so a still may 404 while its frame row survives
+(§10).
 
 There is no existing service pattern on the NUC to copy — `alpaca-switch.exe` is run
-manually as a console program. skyq must be better behaved: both scheduled tasks set an
+manually as a console program. skyq must be better behaved: the scheduled task sets an
 explicit "start in" directory, and the program logs to a file (console output is lost under
 Task Scheduler).
 
-Take the log path, stills source URL, stills credentials and cache directory from config;
-do not hard-code them. The config file holds secrets, so it must be excluded from git and
+Take the log path, skycam URL, skycam credentials and cache directory from config; do not
+hard-code them. The config file holds secrets, so it must be excluded from git and
 the repo ships a `config.example` instead (same discipline as `.env` in the other projects).
 
-**Control surface.** The config file and the CLI subcommands (`report`, `backfill`, `serve`,
-`calibrate`) are the only way to change skyq's behaviour — there is no settings or admin UI,
-by design. Config changes take effect on the next scheduled `report` run, or after restarting
-`skyq serve`.
+**Control surface.** The config file and the CLI subcommands (`report`, `backfill`) are the
+only way to change skyq's behaviour — there is no settings or admin UI, by design. Config
+changes take effect on the next scheduled `report` run.
 
 ---
 
@@ -75,34 +72,27 @@ by design. Config changes take effect on the next scheduled `report` run, or aft
 ```
 skyq/
 ├── main.go                   # package main at the root so a bare `go build` works
-├── report.go                 # the report/backfill/calibrate orchestration
+├── report.go                 # the report/backfill orchestration
 ├── internal/ninalog/         # log parser — pure, no I/O beyond an io.Reader
 │   ├── parse.go
 │   ├── types.go
 │   └── parse_test.go
-├── internal/allsky/          # still fetching + luminance
-│   ├── fetch.go              # list + download new stills from allsky.local into the cache
-│   ├── scan.go               # walk the local cache, parse filename timestamps
-│   ├── luminance.go          # pure — operates on an io.Reader/bytes, no network
-│   └── luminance_test.go
+├── internal/skycam/          # skycam's sky API + thumbnail stills, cached locally
 ├── internal/phd2/            # PHD2 guide-log parser — pure, like ninalog
 │   ├── parse.go
 │   ├── types.go
 │   └── parse_test.go
-├── internal/analysis/        # normalisation, baselines, cloud detection, guiding
+├── internal/analysis/        # normalisation, baselines, attribution, roof fallback, guiding
 │   ├── index.go
-│   ├── cloud.go
+│   ├── cloud.go              # where a night's cloud verdict came from
+│   ├── attribute.go
+│   ├── roof.go
 │   ├── guide.go
 │   └── index_test.go
-├── internal/store/           # sqlc-generated code + migrations
-│   ├── migrations/
-│   ├── queries/
+├── internal/store/           # schema.sql, queries.sql, migrate.go
 │   └── db/                   # sqlc output
-├── internal/report/          # HTML report generation (Phase 1)
-├── internal/publish/         # push report + index to the Linode (Phase 1)
-├── internal/alpaca/          # ObservingConditions HTTP API (Phase 2)
-├── internal/server/          # HTMX live view (Phase 2)
-├── templates/
+├── internal/report/          # HTML report generation
+├── internal/publish/         # push report + index to the Linode
 ├── design/                   # report look & feel — see §6
 │   ├── report.css
 │   ├── CHARTS.md
@@ -110,11 +100,12 @@ skyq/
 └── testdata/
     ├── 20260902.log          # the validated fixture — see §9
     ├── phd2-guidelog.txt     # a small guide log in the real format — see §4.6
+    ├── sky-20260902.json     # HAND-BUILT sky API reply for the validated night — see §9
     └── stills/               # a handful of real stills
 ```
 
-`ninalog`, `phd2`, `allsky` and `analysis` must have **no dependency on the store or the web
-layer**. They are the reusable core and they are where the tests live.
+`ninalog`, `phd2` and `analysis` must have **no dependency on the store, the network or the
+web layer**. They are the reusable core and they are where the tests live.
 
 ---
 
@@ -227,17 +218,16 @@ Once ≥ 5 clear nights exist for a `(target, filter)` pair, use a rolling media
 nights instead, so the index becomes comparable night to night. Store which mode produced
 each night's baseline; the report must say which it used.
 
-"Clear" for baseline purposes = frames before the all-sky cloud onset (§4.4), or all frames
-if no onset was detected.
+"Clear" for baseline purposes = frames before the cloud onset (§4.4), or all frames if no
+onset was detected. A night whose cloud is **unknown** (§4.4) has no clear frames as far as
+other nights are concerned: its baselines serve its own index, but are not written to the
+baselines table, and the night is not history for any pair.
 
 **Too few frames to carry forward.** A baseline built from fewer than 3 clear frames still
 serves its own night, but is not written to the baselines table, and a night with fewer than
 3 clear frames for a pair does not count as history for it. With no onset detected, one frame
 through cloud counts as clear: on 2026-06-28 a single NGC 346 H frame read 2 stars, and that
 stored divisor put the live index for 2026-09-17 at 36250.
-
-**The live index** (§7) picks divisors the same way: tonight's clear-frame baseline wins, and
-a stored baseline only covers a pair with no clear frames yet tonight.
 
 **A target that only begins after the onset** has no clear frames tonight, so the rule above
 gives it no baseline and its frames no index (2026-09-03: onset 21:20, NGC 2070 started
@@ -252,77 +242,71 @@ gives it no baseline and its frames no index (2026-09-03: onset 21:20, NGC 2070 
 
 Pairs that do have clear frames tonight are unaffected — the §9 numbers do not move.
 
-### 4.4 All-sky luminance and cloud detection
+### 4.4 Cloud and roof from skycam
 
-Per still:
+skyq does not measure the sky. For each night it reads skycam's sky API,
+`GET /api/nights/<YYYYMMDD>/sky`, which returns every night-mode frame (sun below −6°) with:
 
-1. Parse the timestamp from the filename (`image-YYYYMMDDHHMMSS.jpg`) — local time.
-2. Decode, crop a horizontal band of upper sky: full width, vertical range **6%–30%** of
-   image height. This avoids both the telescope silhouette (centre) and the horizon glow
-   and moon (bottom). Make it configurable — it depends on camera orientation.
-3. Downsample to 64×16 and take the mean luminance, 0–255.
+- `time`, `image` (path under `/images/`), `stars`, `sky_level`
+- `cloud` — 0–1, or null. skycam only judges cloud with the roof OPEN and the sun below −12°,
+  and it leaves the first ~30 dark, roof-open frames (about 10 minutes) null while it builds
+  its clear-sky baseline. A null early in a session is normal.
+- `roof` — the roll-off controller's own state: OPEN, CLOSED, OPENING, CLOSING, ERROR, or
+  `unknown` when the reading is stale. There is no MOVING.
+- `rain`
+- `onset` — the cloud onset, or null. skyq uses it as given rather than re-deriving it, so
+  the rule lives in one place (skycam's `analysis.CloudOnset`: the first of 3 consecutive
+  frames with cloud ≥ 0.5; a null breaks a run).
 
-Cloud detection, validated:
+The API answers 404 when skycam has no frames for the night.
 
-```
-volatility = population stddev of the last 10 luminance samples
-cloud onset when volatility > 6.0
-```
+**Unknown is never clear and never cloudy** (§8 rule 3). A night's cloud is *unknown* when
+skycam answers 404, the Pi is unreachable or the reply does not parse, or no frame inside the
+imaging session (first frame to last frame + 30 min, extended to cover dawn flats) has a
+cloud reading. An unknown night has no onset, attributes nothing to cloud (§4.5), stores no
+baselines (§4.3), and its report says *Cloud unknown* before anything else.
 
-On the validated night this fired at **03:48** — 18 minutes before the first plate-solve
-failure and about an hour before PHD2 began struggling. That lead time is the whole point of
-Phase 2.
+**Stored verdicts carry forward.** If a night already in the database is rerun and skycam has
+nothing for it, the stored onset and `cloud_source` stand rather than turning into unknown.
+That covers every night before skycam — their onsets came from the retired luminance
+detector below — and any rerun while the Pi is down. `backfill` skips a night whose log is
+unchanged unless `--rerun` is given, so old reports are not re-rendered for nothing.
 
-**Two caveats to carry into the code as comments:**
+**Roof.** The all-sky camera is inside the observatory, so with the roof shut it photographs
+the roof. skycam gates its own cloud on the roof being OPEN, so skyq needs no roof gate. The
+roof still matters to the report, which hatches the stretches the roof was not open on the
+cloud chart:
 
-- The threshold `6.0` is specific to this camera, its gain, and moonlit cloud. Make it
-  configurable, and add a `skyq calibrate` path that derives it from the spread of a known
-  clear night rather than shipping a magic number.
-- AllSky uses **auto-exposure**, so luminance is partly compensated: under cloud the sky got
-  brighter *and* the exposure dropped from 5.0 s to 2.1 s. Both moved together, which
-  amplified the signal — convenient, but it means this is a detection metric, not a
-  photometric one. If the exposure is recoverable per frame (AllSky overlay config, EXIF, or
-  a JSON sidecar), record it and consider normalising. Do not present the raw number as sky
-  brightness in physical units.
+1. **skycam's per-frame roof** is the source. It comes from the controller, so it sees a roof
+   opened by hand. CLOSED, OPENING, CLOSING and ERROR are banded; `unknown` is left plain,
+   as is any gap of more than 5 minutes between frames.
+2. **N.I.N.A.'s log is the fallback**, only for a night skycam cannot serve. `DomeVM.cs`
+   `OpenShutter`/`CloseShutter` lines bracket every move N.I.N.A. commanded and state the
+   shutter on each side of it. That record misses a roof opened by hand: the validated night
+   has no open event at all, only "Shutter state before closing ShutterOpen" at 06:36. So
+   each move's prior state carries **backwards** to the last known change and its resulting
+   state **forwards** to the next one, and **unknown is not closed** — a night the log says
+   nothing about gets no bands.
 
-Absolute level is also useful context but is dominated by the moon: on the validated night
-the baseline was 25–30, rising gently to ~34 with moonrise, then spiking to a peak of 88.9
-at 05:19 under moonlit cloud.
+**Thumbnails** come from the frames' `image` paths, fetched into `cache/YYYYMMDD/`. skycam
+deletes JPEGs after 14 nights while keeping frame rows for a year, so an `image` path can
+404. That thumbnail is left out; it never stops the report.
 
-**The roof gate.** The all-sky camera is inside the observatory, so a still taken with the
-roof shut is a picture of the roof. Both directions of that are wrong, and the first is
-dangerous:
+#### Retired: the luminance detector
 
-- The underside of a shut roof is almost perfectly constant, so it scores near-zero
-  volatility and reads as the clearest sky of the night.
-- A roof opening or closing is a far bigger luminance step than any cloud, and it sits in
-  the trailing window for the next ten samples.
+Until 2026-10-24 skyq measured cloud itself, and §9's "All-sky" numbers came from that: mean
+luminance of a 6–30 % band of each AllSky still, downsampled to 64×16, with cloud onset where
+the population standard deviation of the last 10 samples exceeded 6.0. On the validated night
+it fired at **03:48**, with a peak luminance of **88.9** at **05:19** against a clear-sky
+baseline of 25–30. The threshold was specific to that camera and gain, AllSky's
+auto-exposure made it a detection metric rather than photometry, and it needed a roof gate
+because a shut roof scores near-zero volatility. skycam replaced it; the band, volatility
+settings and `skyq calibrate` are gone, and `legacy_sky_samples` keeps the old per-still
+luminance (§5).
 
-So samples taken while the roof is known shut or moving, plus a settle window after a move
-(default 5 min — the roof edge leaving the frame, and the lights still on inside), are
-dropped from the series before volatility is computed. Dropping the samples rather than
-muting the verdict over them is deliberate: it keeps the step out of the window entirely.
-
-Roof state comes from the N.I.N.A. log — `DomeVM.cs` `OpenShutter`/`CloseShutter` bracket
-every move and each line states the shutter state on its own side of it. **That record is
-incomplete by construction**: N.I.N.A. logs only the moves it commanded, so a roof opened by
-hand from the controller's web page is invisible. The validated night of 2026-09-02/03 has
-no open event at all — only "Shutter state before closing ShutterOpen" at 06:36, which is
-what proves the night was open. Hence two rules:
-
-1. Each move's prior state carries **backwards** to the last known change and its resulting
-   state **forwards** to the next one, so a morning close describes the night behind it.
-2. **Unknown is not closed.** A night the log says nothing about is analysed exactly as it
-   was before the gate existed. Absence of a log line must never blank real sky (§8 rule 3).
-
-The luminance chart, live and in the report, hatches the stretches the log says the roof was
-shut or moving and labels them *roof shut*. Unknown stretches are left plain, for the same
-reason as rule 2.
-
-The gate changes nothing on the validated night — the roof was open throughout, so §9 holds
-unchanged. On 2026-08-31/09-01, where the roof shut at 01:20 and reopened at 05:04, it
-excludes 659 of 2032 stills and leaves the 01:12 onset (eight minutes before the roof shut)
-where it was.
+As a cross-check only, skycam replayed the cached 2026-09-02 stills with the roof stubbed
+OPEN and found its onset at **03:45:52**, two minutes before the validated 03:48. §9 keeps
+03:48.
 
 ### 4.5 Event attribution
 
@@ -332,7 +316,10 @@ Classify each failure so the report says something useful rather than listing er
   acquisition*, not weather. On the validated night this correctly reclassified the single
   event that did not fit the cloud pattern (00:17:12, ten minutes after the 00:10:39 slew
   from IC 4628 to NGC 2070).
-- **Any failure after cloud onset** → attribute to cloud.
+- **Any failure after cloud onset** → attribute to cloud — provided skycam had a cloud reading
+  within 5 minutes of it. A failure in a stretch with no reading (the roof shut, say) is not
+  blamed on cloud: unknown is never cloudy. A night whose verdict was carried forward has no
+  per-frame readings to hand, so its onset covers the rest of the night as before.
 - **Autofocus run whose fitted points had fewer than ~30 detected stars, or that logged
   `New focus point HFR ... significantly worse`** → flag as *untrustworthy*. On the validated
   night the 04:42 run fitted its curve on 3, 4, 6, 24 and 28 stars, rejected its own first
@@ -387,8 +374,9 @@ before, minus one card. On the validated night the split either side of the clou
 
 ## 5. Data model
 
-SQLite. Migrations in `internal/store/migrations`, queries in `internal/store/queries`,
-sqlc generating into `internal/store/db`.
+SQLite. `internal/store/schema.sql` is the source of truth, queries are in
+`internal/store/queries.sql`, and sqlc generates into `internal/store/db`. `migrate.go` brings a
+database made by an older build up to the schema, recording progress in `PRAGMA user_version`.
 
 ```sql
 CREATE TABLE nights (
@@ -397,6 +385,7 @@ CREATE TABLE nights (
     log_path          TEXT NOT NULL,
     log_sha256        TEXT NOT NULL,          -- re-ingest guard, see below
     cloud_onset_at    TEXT,                   -- RFC3339, null if none detected
+    cloud_source      TEXT NOT NULL,          -- 'skycam' | 'luminance' | 'unknown'
     baseline_mode     TEXT NOT NULL,          -- 'self' | 'historical'
     ingested_at       TEXT NOT NULL
 );
@@ -425,16 +414,6 @@ CREATE TABLE events (
     cause    TEXT NOT NULL   -- 'cloud' | 'post_slew' | 'unexplained'
 );
 
-CREATE TABLE sky_samples (
-    id        INTEGER PRIMARY KEY,
-    night_id  INTEGER NOT NULL REFERENCES nights(id) ON DELETE CASCADE,
-    at        TEXT NOT NULL,
-    luminance REAL NOT NULL,
-    volatility REAL,
-    image_path TEXT NOT NULL
-);
-CREATE INDEX sky_night_at ON sky_samples(night_id, at);
-
 CREATE TABLE baselines (
     target      TEXT NOT NULL,
     filter      TEXT NOT NULL,
@@ -447,8 +426,17 @@ CREATE TABLE baselines (
 ```
 
 **Re-ingesting must be idempotent.** Key on `log_sha256`; re-running the morning job on an
-unchanged log is a no-op, and on a changed log replaces that night's rows in a transaction.
-You will re-run this while developing and you must not end up with doubled frames.
+unchanged log and an unchanged cloud verdict is a no-op, and anything else replaces that
+night's rows in a transaction. You will re-run this while developing and you must not end up
+with doubled frames.
+
+**Migration 1 (2026-10-24, skycam).** Adds `nights.cloud_source`; every night already on
+record is tagged `'luminance'` and keeps counting as clear-sky history. skyq stores nothing
+per frame from skycam: the Pi keeps a year of frame rows, and the carried-forward verdict
+(§4.4) covers anything older. The old `sky_samples` table held the retired detector's
+per-still luminance; its rows move to `legacy_sky_samples` (`night_of`, `at`, `luminance`,
+`volatility`, `image_path`), keyed by night with no foreign key so re-ingesting a night cannot
+cascade them away, and `sky_samples` is dropped. Nothing reads the legacy table.
 
 ---
 
@@ -459,8 +447,8 @@ You will re-run this while developing and you must not end up with doubled frame
 1. Locate the log for that night in `%LOCALAPPDATA%\NINA\Logs\`, hash it, ingest frames
    and events. Read the night's PHD2 guide logs over the same window (§4.6); a missing
    directory is a log line, never an error.
-2. Sync last night's stills from `allsky.local` into the local cache (skip files already
-   present), then compute luminance samples and detect cloud onset.
+2. Read the night from skycam's sky API (§4.4): cloud onset, per-frame cloud and roof. A
+   missing night or an unreachable Pi is a log line and unknown cloud, never an error.
 3. Compute or load baselines, populate `index_pct`.
 4. Attribute events (§4.5).
 5. Render the HTML report to a configured output dir.
@@ -471,7 +459,10 @@ You will re-run this while developing and you must not end up with doubled frame
    the local report from being written — the analysis is the product, the upload is a copy.
 
 Run it from a Windows Task Scheduler daily task at, say, 09:00 local — well after any
-shutdown sequence and any timelapse generation on the AllSky box.
+shutdown sequence and after skycam has processed the night at dawn.
+
+`skyq backfill [--nights 30]` runs the same steps for recent nights, skipping any night
+already ingested from an unchanged log. `--rerun` runs those too.
 
 **The report should lead with a verdict, not a chart.** One or two sentences: how much of the
 night was usable, when the sky went, what failed because of it, and anything unexplained.
@@ -483,10 +474,12 @@ Report contents, in order:
    frames kept vs lost).
 2. Transparency index over time, one line per filter, with a dashed 100 baseline, autofocus
    bands shaded, target changes marked, failures as ticks on the base.
-3. All-sky luminance over the same x-axis.
+3. All-sky cloud cover from skycam over the same x-axis, with a dashed rule at the 50 %
+   onset level and the stretches the roof was not open hatched.
 4. PHD2 guiding over the same x-axis — per-minute RA and Dec RMS, autofocus bands, PHD2
    errors on the rail. Absent entirely on a night with no guide log.
-5. All-sky thumbnails at the interesting moments — onset, worst, any recovery.
+5. All-sky thumbnails at the interesting moments — start, onset, most cloud, end. Any whose
+   still skycam no longer keeps is left out.
 6. Baseline table (the divisors — makes the index auditable).
 7. Event timeline with attributed causes.
 8. Collapsed raw frame table.
@@ -516,56 +509,22 @@ self-contained file — CSS inlined, thumbnails as `data:` URIs, no external req
 
 ---
 
-## 7. Phase 2 — live monitor
+## 7. Live monitoring — moved to skycam
 
-`skyq serve` — long-running, Windows Task Scheduler at-startup task with restart-on-failure.
+skyq's former Phase 2 (`skyq serve`: a stills poller, a darkness gate, a live HTMX page and an
+Alpaca ObservingConditions device on `:11112`, sharing discovery port 32227 with
+alpaca-switch) was removed on 2026-10-24. skycam on the Pi does all of it now:
 
-**Watcher.** The stills are remote, so this is a poller, not fsnotify: every 30–60 s, list
-today's image directory on `allsky.local` (HTTP index or SMB), fetch any stills newer than
-the last seen, and remember the AllSky directory rolls over at local noon. On each new
-still: compute luminance, append a sample, recompute rolling volatility. Stills land in the
-same cache the morning report reads, so the 09:00 sync becomes a no-op after a served night.
+- Its Alpaca ObservingConditions device is on `allsky.local:11111`, and N.I.N.A. already
+  reads it. `CloudCover` comes from skycam's star counts, and `SkyQuality` is approximate sky
+  brightness in mag/arcsec², not skyq's transparency index. skycam also passes
+  OpenWeatherMap's ambient readings through.
+- Its live view is on the Pi and, remotely, at skycam.mchugh.au.
+- Staleness, twilight and roof-shut readings answer unavailable, never zero — the same rule
+  §8 holds skyq to.
 
-**Darkness gate.** AllSky records from dusk and the twilight luminance ramp reads as
-volatility, so live cloud detection only counts samples inside the astronomical dark window
-(nautical twilight to nautical twilight, via `github.com/exploded/riseset` and the
-configured site latitude/longitude). Outside it — and whenever the newest still is stale —
-the cloud state is unknown, and unknown is reported as unavailable, never as clear.
-
-**Alpaca ObservingConditions device.** Implement the standard endpoints under
-`/api/v1/observingconditions/0/`. **Discovery responder shares UDP 32227** with
-`alpaca-switch` via SO_REUSEADDR, as the Alpaca discovery spec directs for machines running
-several Alpaca servers: each hears the broadcast and replies with its own API port, and the
-client queries every responder. (Both programs were changed on 2026-09-03 to bind shareably;
-N.I.N.A. turned out to have no manual add-by-address for Alpaca, so discovery is the only
-path into its device chooser.) A failed bind — an old exclusive alpaca-switch — logs a
-warning and costs only auto-discovery. Discovery replies carry the machine's LAN address,
-so the Alpaca API binds all interfaces (`:11112`), on a port distinct from alpaca-switch's
-11111. Map:
-
-- `CloudCover` → 0–100, derived from volatility against the configured threshold
-- `SkyQuality` → the transparency index if a current one is available
-- `SkyBrightness` → mean luminance (document the units honestly as instrumental, not mag/arcsec²)
-- `TimeSinceLastUpdate` → seconds since the last still
-
-N.I.N.A. reads this as weather data, and Sequencer Powerups exposes weather values as
-expression symbols — so gating becomes an `If` expression in the sequence, which is already
-a familiar pattern in this observatory.
-
-**Staleness is not zero.** If the newest still is older than a configured max age (default
-5 minutes), the device must report values as unavailable rather than returning a stale or
-zeroed reading. A monitor that silently reports "clear" because the camera died is worse
-than no monitor. Now that the stills cross the LAN, this rule covers network and AllSky-box
-failures too, not just a dead camera — same behaviour, more ways to trigger it.
-
-**HTMX live page** at `/`, on its own listener so it can bind LAN-wide while the Alpaca API
-stays on loopback. The page is strictly read-only — it renders state and never mutates it:
-no forms, no buttons, no POST handlers. A control that could gate or un-gate N.I.N.A. from a
-LAN page would be an interlock nobody designed (§8). One page: current index, current volatility, a luminance
-sparkline, the last still, and tonight's events. Follow the project's Go+HTMX conventions —
-parse templates once at startup with the clone-per-page pattern, `hx-get` with
-`hx-trigger="every 30s"` on a stable container with a `min-height` so nothing jumps,
-self-hosted `htmx.min.js` under `static/js/`. No CDN.
+alpaca-switch no longer needs to share UDP 32227 with skyq; its shareable bind is harmless
+and can stay. The Task Scheduler task for `skyq serve` is to be disabled.
 
 ---
 
@@ -574,13 +533,15 @@ self-hosted `htmx.min.js` under `static/js/`. No CDN.
 These are not preferences. Get them wrong and the observatory pays for it.
 
 1. **Transparency must never gate the roof.** Cloud is not a safety condition; rain is. The
-   RG-11 safety monitor keeps sole ownership of the close decision. This tool exposes
-   ObservingConditions (advisory), **never** SafetyMonitor.
+   RG-11 safety monitor keeps sole ownership of the close decision. skyq exposes no device at
+   all; the ObservingConditions device (advisory) lives in skycam and is **never** a
+   SafetyMonitor.
 2. **Advisory means skip work, not stop the observatory.** Legitimate uses: defer autofocus,
    hold off plate solving, pause a target and record the gap. Nothing that moves the roof or
    parks the mount.
 3. **Unknown ≠ unsafe.** When data is stale or missing, report unknown. Consumers must treat
-   unknown as "do not gate", so a dead camera never triggers observatory actions.
+   unknown as "do not gate", so a dead camera never triggers observatory actions. In the
+   report, unknown cloud is never clear and never cloudy (§4.4).
 4. **Read-only on N.I.N.A.'s files.** Open the log read-only. Never write into N.I.N.A.'s
    directories.
 
@@ -595,6 +556,13 @@ cost one night. Do not add a second interlock in the same path.
 
 `testdata/20260902.log` is the validated fixture. These values come from the hand-checked
 prototype and the parser must reproduce them exactly.
+
+**The cloud onset is a recorded input: 03:48.** It was validated by hand from that night's
+all-sky stills with the retired luminance detector (§4.4). skycam did not exist that night,
+so the sky API has no data for it. The baseline, index and attribution tests take 03:48 as
+given, and the end-to-end test feeds it through `testdata/sky-20260902.json` — a **hand-built**
+sky API reply (synthetic cloud values, roof OPEN throughout, onset 03:48, stills only for the
+four frames in `testdata/stills/`), not a recording.
 
 **Parsing**
 
@@ -625,36 +593,28 @@ prototype and the parser must reproduce them exactly.
 The tight pre-cloud IQR is the regression test that matters. If normalisation breaks, that
 baseline stops being flat — under raw counts the same clear hours ranged 79 to 232.
 
-**All-sky** — cloud onset at **03:48**, peak luminance **88.9** at **05:19**, clear-sky
-baseline 25–30.
+**All-sky** — *retired.* The luminance detector's onset at 03:48, peak luminance 88.9 at 05:19
+and clear-sky baseline 25–30 are kept in §4.4 as history. skyq no longer computes them, and
+no test asserts them.
 
 **Attribution** — the 00:17:12 PHD2 error classifies as `post_slew` (it follows the 00:10:39
 slew by under 10 minutes); the other five classify as `cloud`; the 04:42 autofocus run flags
 as untrustworthy.
 
-Keep a handful of real stills in `testdata/stills/` covering clear, cloudy and the onset, so
-the luminance and volatility code is tested on real pixels rather than synthetic ones.
+`testdata/stills/` keeps four real stills from the night — clear, the onset and the cloudy
+peak — so the report's thumbnails are tested on real pixels.
 
 ---
 
-## 10. Open decisions to settle first
+## 10. Open decisions
 
-1. **Stills pull mechanism** — HTTP from the AllSky web server or a read-only SMB export
-   (§2). Confirm what `allsky.local` actually exposes before coding — including whether the
-   web server's auth is Basic or Digest, and whether it serves a directory listing the
-   poller can parse; affects config shape and the Phase 2 poller. (Log transport, the previous decision here, is resolved: the log
-   is a local file on the NUC.)
-2. **Crop band** — 6%–30% of height worked for the prototype's camera orientation. Verify
-   against a real still before hard-coding the default.
-3. **Volatility threshold** — 6.0 is validated on one night. Decide whether to ship it as a
-   default or require `skyq calibrate` against a known clear night before Phase 2 gates
-   anything.
-4. **Exposure normalisation** — determine whether AllSky exposes per-frame exposure time in a
-   machine-readable form on `allsky.local`. If it does, the luminance metric gets meaningfully
-   better (§4.4).
-5. **Retention** — AllSky's `DAYS_TO_KEEP` deletes old image directories on `allsky.local`,
-   and the NUC's stills cache needs its own pruning (a config value, e.g. 14 days). skyq's
-   derived samples are tiny; keep them indefinitely and let the images go.
+Settled: the stills pull mechanism, crop band, volatility threshold and exposure
+normalisation all went with the luminance detector — skycam answers them on the Pi.
+
+1. **Retention** — skycam keeps frame rows for 365 days and JPEGs for 14 nights. The NUC's
+   stills cache now holds only thumbnails and stills cached before skycam; it needs its own
+   pruning (a config value, e.g. 90 days) only if it grows. skyq's own rows are tiny; keep
+   them indefinitely.
 
 ---
 
