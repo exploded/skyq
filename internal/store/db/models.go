@@ -45,15 +45,7 @@ type Night struct {
 	LogPath      string         `json:"log_path"`
 	LogSha256    string         `json:"log_sha256"`
 	CloudOnsetAt sql.NullString `json:"cloud_onset_at"`
+	CloudSource  string         `json:"cloud_source"`
 	BaselineMode string         `json:"baseline_mode"`
 	IngestedAt   string         `json:"ingested_at"`
-}
-
-type SkySample struct {
-	ID         int64           `json:"id"`
-	NightID    int64           `json:"night_id"`
-	At         string          `json:"at"`
-	Luminance  float64         `json:"luminance"`
-	Volatility sql.NullFloat64 `json:"volatility"`
-	ImagePath  string          `json:"image_path"`
 }

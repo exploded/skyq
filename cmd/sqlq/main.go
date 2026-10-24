@@ -22,7 +22,7 @@ import (
 
 var diagnostics = []string{
 	`SELECT * FROM baselines ORDER BY median_stars LIMIT 25`,
-	`SELECT night_of, cloud_onset_at, baseline_mode, ingested_at FROM nights ORDER BY night_of DESC LIMIT 10`,
+	`SELECT night_of, cloud_onset_at, cloud_source, baseline_mode, ingested_at FROM nights ORDER BY night_of DESC LIMIT 10`,
 	`SELECT n.night_of, f.target, f.filter, COUNT(*) AS lights,
 	        MIN(f.detected_stars) AS min_stars, MAX(f.detected_stars) AS max_stars
 	   FROM frames f JOIN nights n ON n.id = f.night_id

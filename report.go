@@ -380,7 +380,7 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 	}
 	if err := qtx.CreateNight(ctx, db.CreateNightParams{
 		NightOf: in.night, LogPath: in.logPath, LogSha256: in.sha,
-		CloudOnsetAt: onsetStr, BaselineMode: in.mode,
+		CloudOnsetAt: onsetStr, CloudSource: "luminance", BaselineMode: in.mode,
 		IngestedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		return err
@@ -410,19 +410,6 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 		if err := qtx.InsertEvent(ctx, db.InsertEventParams{
 			NightID: night.ID, At: e.At.UTC().Format(time.RFC3339),
 			Kind: string(e.Kind), Detail: e.Detail, Cause: string(e.Cause),
-		}); err != nil {
-			return err
-		}
-	}
-	vol := analysis.VolatilitySeries(in.samples, in.volWindow)
-	for i, s := range in.samples {
-		v := sql.NullFloat64{}
-		if !isNaN(vol[i]) {
-			v = sql.NullFloat64{Float64: vol[i], Valid: true}
-		}
-		if err := qtx.InsertSkySample(ctx, db.InsertSkySampleParams{
-			NightID: night.ID, At: s.At.UTC().Format(time.RFC3339),
-			Luminance: s.Luminance, Volatility: v, ImagePath: "",
 		}); err != nil {
 			return err
 		}

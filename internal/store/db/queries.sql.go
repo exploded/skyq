@@ -11,8 +11,8 @@ import (
 )
 
 const createNight = `-- name: CreateNight :exec
-INSERT INTO nights (night_of, log_path, log_sha256, cloud_onset_at, baseline_mode, ingested_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO nights (night_of, log_path, log_sha256, cloud_onset_at, cloud_source, baseline_mode, ingested_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateNightParams struct {
@@ -20,6 +20,7 @@ type CreateNightParams struct {
 	LogPath      string         `json:"log_path"`
 	LogSha256    string         `json:"log_sha256"`
 	CloudOnsetAt sql.NullString `json:"cloud_onset_at"`
+	CloudSource  string         `json:"cloud_source"`
 	BaselineMode string         `json:"baseline_mode"`
 	IngestedAt   string         `json:"ingested_at"`
 }
@@ -30,6 +31,7 @@ func (q *Queries) CreateNight(ctx context.Context, arg CreateNightParams) error 
 		arg.LogPath,
 		arg.LogSha256,
 		arg.CloudOnsetAt,
+		arg.CloudSource,
 		arg.BaselineMode,
 		arg.IngestedAt,
 	)
@@ -46,7 +48,7 @@ func (q *Queries) DeleteNight(ctx context.Context, nightOf string) error {
 }
 
 const getNight = `-- name: GetNight :one
-SELECT id, night_of, log_path, log_sha256, cloud_onset_at, baseline_mode, ingested_at
+SELECT id, night_of, log_path, log_sha256, cloud_onset_at, cloud_source, baseline_mode, ingested_at
 FROM nights WHERE night_of = ?
 `
 
@@ -59,6 +61,7 @@ func (q *Queries) GetNight(ctx context.Context, nightOf string) (Night, error) {
 		&i.LogPath,
 		&i.LogSha256,
 		&i.CloudOnsetAt,
+		&i.CloudSource,
 		&i.BaselineMode,
 		&i.IngestedAt,
 	)
@@ -121,30 +124,6 @@ func (q *Queries) InsertFrame(ctx context.Context, arg InsertFrameParams) error 
 	return err
 }
 
-const insertSkySample = `-- name: InsertSkySample :exec
-INSERT INTO sky_samples (night_id, at, luminance, volatility, image_path)
-VALUES (?, ?, ?, ?, ?)
-`
-
-type InsertSkySampleParams struct {
-	NightID    int64           `json:"night_id"`
-	At         string          `json:"at"`
-	Luminance  float64         `json:"luminance"`
-	Volatility sql.NullFloat64 `json:"volatility"`
-	ImagePath  string          `json:"image_path"`
-}
-
-func (q *Queries) InsertSkySample(ctx context.Context, arg InsertSkySampleParams) error {
-	_, err := q.db.ExecContext(ctx, insertSkySample,
-		arg.NightID,
-		arg.At,
-		arg.Luminance,
-		arg.Volatility,
-		arg.ImagePath,
-	)
-	return err
-}
-
 const listBaselines = `-- name: ListBaselines :many
 SELECT target, filter, median_stars, n_frames, n_nights, updated_at
 FROM baselines ORDER BY target, filter
@@ -187,6 +166,7 @@ JOIN nights n ON n.id = f.night_id
 WHERE f.class = 'light'
   AND f.target = ?
   AND f.filter = ?
+  AND n.cloud_source != 'unknown'
   AND (n.cloud_onset_at IS NULL OR f.at < n.cloud_onset_at)
 ORDER BY n.night_of, f.at
 `
@@ -202,8 +182,9 @@ type ListClearLightFramesRow struct {
 }
 
 // Clear-sky light frames for one (target, filter) across all nights: frames
-// before that night's cloud onset, or the whole night when no onset. Feeds
-// the rolling historical baseline.
+// before that night's cloud onset, or the whole night when no onset. A night
+// whose cloud is unknown is not clear history. Feeds the rolling historical
+// baseline.
 func (q *Queries) ListClearLightFrames(ctx context.Context, arg ListClearLightFramesParams) ([]ListClearLightFramesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listClearLightFrames, arg.Target, arg.Filter)
 	if err != nil {
@@ -302,7 +283,7 @@ func (q *Queries) ListFrames(ctx context.Context, nightID int64) ([]Frame, error
 }
 
 const listNights = `-- name: ListNights :many
-SELECT id, night_of, log_path, log_sha256, cloud_onset_at, baseline_mode, ingested_at
+SELECT id, night_of, log_path, log_sha256, cloud_onset_at, cloud_source, baseline_mode, ingested_at
 FROM nights ORDER BY night_of DESC
 `
 
@@ -321,43 +302,9 @@ func (q *Queries) ListNights(ctx context.Context) ([]Night, error) {
 			&i.LogPath,
 			&i.LogSha256,
 			&i.CloudOnsetAt,
+			&i.CloudSource,
 			&i.BaselineMode,
 			&i.IngestedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSkySamples = `-- name: ListSkySamples :many
-SELECT id, night_id, at, luminance, volatility, image_path
-FROM sky_samples WHERE night_id = ? ORDER BY at
-`
-
-func (q *Queries) ListSkySamples(ctx context.Context, nightID int64) ([]SkySample, error) {
-	rows, err := q.db.QueryContext(ctx, listSkySamples, nightID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SkySample
-	for rows.Next() {
-		var i SkySample
-		if err := rows.Scan(
-			&i.ID,
-			&i.NightID,
-			&i.At,
-			&i.Luminance,
-			&i.Volatility,
-			&i.ImagePath,
 		); err != nil {
 			return nil, err
 		}

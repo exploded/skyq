@@ -1,5 +1,6 @@
 -- skyq schema. Single source of truth; store.Open runs this at startup
--- (CREATE IF NOT EXISTS throughout). Times are RFC3339 TEXT in UTC, which
+-- (CREATE IF NOT EXISTS throughout), then the migrations in migrate.go for
+-- databases made by older builds. Times are RFC3339 TEXT in UTC, which
 -- compares correctly as text.
 
 CREATE TABLE IF NOT EXISTS nights (
@@ -8,6 +9,11 @@ CREATE TABLE IF NOT EXISTS nights (
     log_path          TEXT NOT NULL,
     log_sha256        TEXT NOT NULL,          -- re-ingest guard
     cloud_onset_at    TEXT,                   -- RFC3339, null if none detected
+    -- Where cloud_onset_at came from: 'skycam' (the Pi's sky API),
+    -- 'luminance' (skyq's retired still-luminance detector; every night
+    -- ingested before skycam) or 'unknown' (no sky data: no onset, and the
+    -- night is not clear-sky history).
+    cloud_source      TEXT NOT NULL,
     baseline_mode     TEXT NOT NULL,          -- 'self' | 'historical'
     ingested_at       TEXT NOT NULL
 );
@@ -35,16 +41,6 @@ CREATE TABLE IF NOT EXISTS events (
     detail   TEXT NOT NULL,
     cause    TEXT NOT NULL   -- 'cloud' | 'post_slew' | 'unexplained'
 );
-
-CREATE TABLE IF NOT EXISTS sky_samples (
-    id         INTEGER PRIMARY KEY,
-    night_id   INTEGER NOT NULL REFERENCES nights(id) ON DELETE CASCADE,
-    at         TEXT NOT NULL,
-    luminance  REAL NOT NULL,
-    volatility REAL,
-    image_path TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS sky_night_at ON sky_samples(night_id, at);
 
 CREATE TABLE IF NOT EXISTS baselines (
     target       TEXT NOT NULL,
