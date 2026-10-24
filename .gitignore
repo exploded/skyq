@@ -6,3 +6,4 @@ skyq.exe
 reports/
 cache/
 config.prod.json
+*.log
