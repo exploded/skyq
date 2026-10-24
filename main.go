@@ -3,7 +3,7 @@
 // Subcommands:
 //
 //	skyq report    [--night 2026-09-02]   analyse one night, write + publish the report
-//	skyq backfill  [--nights 30]          re-run report for recent nights with logs
+//	skyq backfill  [--nights 30] [--rerun] report recent nights whose log is new or changed
 package main
 
 import (
@@ -30,6 +30,7 @@ func main() {
 	cfgPath := fs.String("config", "config.json", "path to config file")
 	night := fs.String("night", "", "night to analyse (evening date, YYYY-MM-DD; default: the night that just ended)")
 	nights := fs.Int("nights", 30, "backfill: how many nights back to try")
+	rerun := fs.Bool("rerun", false, "backfill: rerun nights whose log is unchanged since they were ingested")
 	fs.Parse(os.Args[2:])
 
 	cfg, err := config.Load(*cfgPath)
@@ -43,24 +44,29 @@ func main() {
 
 	switch cmd {
 	case "report":
-		if err := runReport(cfg, loc, nightOf(*night, loc)); err != nil {
+		if err := runReport(cfg, loc, nightOf(*night, loc), false); err != nil {
 			log.Fatal(err)
 		}
 	case "backfill":
-		ran := 0
+		// Backfill leaves a night alone once its log is ingested: rerunning it
+		// would re-render and republish a report that may predate skycam, and
+		// lose its luminance chart for nothing. --rerun forces it.
+		ran, skipped := 0, 0
 		for i := 0; i < *nights; i++ {
 			n := time.Now().In(loc).AddDate(0, 0, -1-i).Format("2006-01-02")
-			err := runReport(cfg, loc, n)
+			err := runReport(cfg, loc, n, !*rerun)
 			switch {
 			case err == nil:
 				ran++
+			case err == errUnchanged:
+				skipped++
 			case os.IsNotExist(err) || err == errNoLogs:
 				continue
 			default:
 				log.Printf("night %s: %v", n, err)
 			}
 		}
-		log.Printf("backfill complete: %d nights", ran)
+		log.Printf("backfill complete: %d nights, %d unchanged and skipped", ran, skipped)
 	default:
 		usage()
 	}

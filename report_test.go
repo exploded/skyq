@@ -118,7 +118,7 @@ func readNight(t *testing.T, cfg *config.Config) nightRows {
 func TestReportFromSkycam(t *testing.T) {
 	var down atomic.Bool
 	cfg := testConfig(t, fakePi(t, &down).URL)
-	if err := runReport(cfg, time.UTC, "2026-09-02"); err != nil {
+	if err := runReport(cfg, time.UTC, "2026-09-02", false); err != nil {
 		t.Fatal(err)
 	}
 	got := readNight(t, cfg)
@@ -139,7 +139,7 @@ func TestReportFromSkycam(t *testing.T) {
 	// The Pi forgets the night (or is down) and the night is rerun: the
 	// stored verdict stands rather than turning into unknown.
 	down.Store(true)
-	if err := runReport(cfg, time.UTC, "2026-09-02"); err != nil {
+	if err := runReport(cfg, time.UTC, "2026-09-02", false); err != nil {
 		t.Fatal(err)
 	}
 	again := readNight(t, cfg)
@@ -210,7 +210,7 @@ func TestReportCloudUnknown(t *testing.T) {
 	var down atomic.Bool
 	down.Store(true)
 	cfg := testConfig(t, fakePi(t, &down).URL)
-	if err := runReport(cfg, time.UTC, "2026-09-02"); err != nil {
+	if err := runReport(cfg, time.UTC, "2026-09-02", false); err != nil {
 		t.Fatal(err)
 	}
 	got := readNight(t, cfg)
@@ -233,10 +233,36 @@ func TestReportCloudUnknown(t *testing.T) {
 // With no skycam configured at all, the report still runs on the log.
 func TestReportWithoutSkycam(t *testing.T) {
 	cfg := testConfig(t, "")
-	if err := runReport(cfg, time.UTC, "2026-09-02"); err != nil {
+	if err := runReport(cfg, time.UTC, "2026-09-02", false); err != nil {
 		t.Fatal(err)
 	}
 	if got := readNight(t, cfg); got.night.CloudSource != "unknown" {
 		t.Errorf("cloud_source = %s, want unknown", got.night.CloudSource)
+	}
+}
+
+// Backfill skips a night already ingested from the same log; --rerun (no
+// skip) runs it again.
+func TestBackfillSkipsUnchangedNights(t *testing.T) {
+	var down atomic.Bool
+	cfg := testConfig(t, fakePi(t, &down).URL)
+	if err := runReport(cfg, time.UTC, "2026-09-02", true); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	report := filepath.Join(cfg.ReportsDir, "2026-09-02.html")
+	if err := os.Remove(report); err != nil {
+		t.Fatal(err)
+	}
+	if err := runReport(cfg, time.UTC, "2026-09-02", true); err != errUnchanged {
+		t.Fatalf("second run = %v, want errUnchanged", err)
+	}
+	if _, err := os.Stat(report); err == nil {
+		t.Error("skipped night re-rendered its report")
+	}
+	if err := runReport(cfg, time.UTC, "2026-09-02", false); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	if _, err := os.Stat(report); err != nil {
+		t.Errorf("rerun wrote no report: %v", err)
 	}
 }

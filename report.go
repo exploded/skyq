@@ -25,11 +25,18 @@ import (
 
 var errNoLogs = errors.New("no N.I.N.A. logs for that night")
 
+// errUnchanged is runReport declining a night whose log is already
+// ingested unchanged, when asked to skip those.
+var errUnchanged = errors.New("log unchanged since the night was ingested")
+
 // minClearNightsForHistorical is when a (target, filter) baseline switches
 // from the night's own pre-cloud median to a rolling median across nights.
 const minClearNightsForHistorical = 5
 
-func runReport(cfg *config.Config, loc *time.Location, night string) error {
+// runReport analyses one night and writes, then publishes, its report.
+// With skipUnchanged it does nothing for a night already ingested from the
+// same log, and returns errUnchanged.
+func runReport(cfg *config.Config, loc *time.Location, night string, skipUnchanged bool) error {
 	nightStart, err := time.ParseInLocation("2006-01-02", night, loc)
 	if err != nil {
 		return fmt.Errorf("bad night %q: %w", night, err)
@@ -53,6 +60,14 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		return errNoLogs
 	}
 	log.Printf("night %s: %d logs, %d frames, %d events", night, len(logs), len(res.Frames), len(res.Events))
+	if skipUnchanged {
+		if same, err := ingestedFrom(cfg.DBPath, night, sha); err != nil {
+			return err
+		} else if same {
+			log.Printf("night %s: log unchanged since it was ingested — skipping (--rerun forces it)", night)
+			return errUnchanged
+		}
+	}
 
 	// The imaging session, which skycam's cloud has to cover for the
 	// night's cloud to count as known. Dawn flats can run past the last light
@@ -226,6 +241,24 @@ func guideNight(dir string, loc *time.Location, start, end time.Time) *phd2.Resu
 	// One guide log can span two nights, so the night's window decides what
 	// belongs to it, not the filename that matched.
 	return res.Clip(start, end)
+}
+
+// ingestedFrom reports whether the night is on record from a log with this
+// hash.
+func ingestedFrom(dbPath, night, sha string) (bool, error) {
+	sdb, err := store.Open(dbPath)
+	if err != nil {
+		return false, err
+	}
+	defer sdb.Close()
+	prev, err := db.New(sdb).GetNight(context.Background(), night)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return prev.LogSha256 == sha, nil
 }
 
 // cloudVerdict is the night's cloud as attribution and the report use it.
