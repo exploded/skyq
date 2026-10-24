@@ -48,26 +48,6 @@ type Config struct {
 	VolatilityWindow    int     `json:"volatility_window"`
 	VolatilityThreshold float64 `json:"volatility_threshold"`
 
-	// Phase 2 (skyq serve). Latitude/longitude drive the astronomical
-	// darkness gate — cloud volatility only means something once nautical
-	// twilight has ended. The Alpaca API binds all interfaces: discovery
-	// replies carry the machine's LAN address, so N.I.N.A. connects to
-	// that, never to loopback. Discovery shares UDP 32227 with
-	// alpaca-switch via SO_REUSEADDR.
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AlpacaAddr     string  `json:"alpaca_addr"`
-	LiveAddr       string  `json:"live_addr"`
-	PollSeconds    int     `json:"poll_seconds"`
-	MaxStillAgeMin int     `json:"max_still_age_minutes"`
-
-	// OpenWeatherMapAPIKey enables the ambient-conditions pass-through
-	// (temperature, humidity, pressure, dew point, wind, rain) on the
-	// Alpaca device, so N.I.N.A.'s FITS headers lose nothing when its
-	// weather source switches from OpenWeatherMap to skyq. Empty leaves
-	// those sensors not-implemented.
-	OpenWeatherMapAPIKey string `json:"openweathermap_api_key"`
-
 	Publish Publish `json:"publish"`
 }
 
@@ -84,10 +64,6 @@ func Load(path string) (*Config, error) {
 		BandBottom:          0.30,
 		VolatilityWindow:    10,
 		VolatilityThreshold: 6.0,
-		AlpacaAddr:          ":11112",
-		LiveAddr:            ":8996",
-		PollSeconds:         60,
-		MaxStillAgeMin:      5,
 	}
 	if err := json.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
