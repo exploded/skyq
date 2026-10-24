@@ -272,15 +272,14 @@ type cloudVerdict struct {
 	KnownAt  func(time.Time) bool
 }
 
-// skycamClient is nil when no skycam URL is configured, which leaves every
+// skycamClient is nil when allsky_base_url is empty, which leaves every
 // night's cloud unknown.
 func skycamClient(cfg *config.Config) *skycam.Client {
-	u := cfg.Skycam()
-	if u == "" {
+	if cfg.AllSkyBaseURL == "" {
 		return nil
 	}
 	return &skycam.Client{
-		BaseURL: u, Username: cfg.AllSkyUsername, Password: cfg.AllSkyPassword,
+		BaseURL: cfg.AllSkyBaseURL, Username: cfg.AllSkyUsername, Password: cfg.AllSkyPassword,
 		CacheDir: cfg.CacheDir,
 	}
 }
@@ -290,7 +289,7 @@ func skycamClient(cfg *config.Config) *skycam.Client {
 // alone, with cloud unknown.
 func skyNight(c *skycam.Client, loc *time.Location, night string) *skycam.Night {
 	if c == nil {
-		log.Printf("no skycam_url or allsky_base_url configured — cloud unknown")
+		log.Printf("no allsky_base_url configured — cloud unknown")
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

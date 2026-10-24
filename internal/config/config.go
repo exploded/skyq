@@ -37,17 +37,13 @@ type Config struct {
 	// guiding card and nothing else.
 	PHD2LogDir string `json:"phd2_log_dir"`
 
-	// AllSkyBaseURL is the Pi's stills folder, http://allsky.local/images.
-	// skycam serves it in allsky's layout, and the report's thumbnails come
-	// from it. The credentials cover the sky API as well.
+	// AllSkyBaseURL is skycam's web server on the Pi, http://allsky.local.
+	// It serves the sky API (cloud, onset and roof per night) and the
+	// stills under /images/, both behind these Basic auth credentials.
+	// Empty leaves every night's cloud unknown.
 	AllSkyBaseURL  string `json:"allsky_base_url"`
 	AllSkyUsername string `json:"allsky_username"`
 	AllSkyPassword string `json:"allsky_password"`
-
-	// SkycamURL is skycam's web server on the Pi, which serves the sky API
-	// (cloud, onset and roof per night) and /images/. Empty means the scheme
-	// and host of AllSkyBaseURL, which is where skycam runs.
-	SkycamURL string `json:"skycam_url"`
 
 	CacheDir   string `json:"cache_dir"`
 	DBPath     string `json:"db_path"`
@@ -75,20 +71,26 @@ func Load(path string) (*Config, error) {
 	if cfg.PHD2LogDir == "" {
 		cfg.PHD2LogDir = os.ExpandEnv(`${USERPROFILE}\Documents\PHD2`)
 	}
+	if err := cfg.checkAllSkyURL(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return cfg, nil
 }
 
-// Skycam returns the skycam base URL: SkycamURL, or failing that the scheme
-// and host of AllSkyBaseURL. Empty when neither is set.
-func (c *Config) Skycam() string {
-	if c.SkycamURL != "" {
-		return strings.TrimRight(c.SkycamURL, "/")
+// checkAllSkyURL rejects an allsky_base_url with a path. The old value,
+// http://allsky.local/images, would send every sky API request to a path
+// that 404s, and a 404 reads as cloud unknown, so the mistake would show
+// only as a run of nights with no cloud.
+func (c *Config) checkAllSkyURL() error {
+	c.AllSkyBaseURL = strings.TrimRight(c.AllSkyBaseURL, "/")
+	if c.AllSkyBaseURL == "" {
+		return nil
 	}
 	u, err := url.Parse(c.AllSkyBaseURL)
-	if err != nil || u.Host == "" {
-		return ""
+	if err != nil || u.Host == "" || u.Path != "" {
+		return fmt.Errorf("allsky_base_url %q must be the Pi's address alone, e.g. http://allsky.local", c.AllSkyBaseURL)
 	}
-	return u.Scheme + "://" + u.Host
+	return nil
 }
 
 // Location resolves the configured timezone.

@@ -66,7 +66,7 @@ func testConfig(t *testing.T, skycamURL string) *config.Config {
 		t.Fatal(err)
 	}
 	return &config.Config{
-		NINALogDir: logs, SkycamURL: skycamURL,
+		NINALogDir: logs, AllSkyBaseURL: skycamURL,
 		AllSkyUsername: "skyq", AllSkyPassword: "secret",
 		CacheDir: filepath.Join(dir, "cache"), DBPath: filepath.Join(dir, "skyq.db"),
 		ReportsDir: filepath.Join(dir, "reports"),

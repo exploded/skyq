@@ -40,8 +40,9 @@ those nights again, for example after a change to the report.
    (`config.json` is gitignored — never commit it).
    - `allsky_username` and `allsky_password` are skycam's `images_user` and
      `images_password`. The same Basic auth covers `/images/` and the sky API.
-   - `skycam_url` may be left empty: it defaults to the scheme and host of
-     `allsky_base_url`, which is where skycam runs.
+   - `allsky_base_url` is skycam's address alone, `http://allsky.local`.
+     skyq refuses to start with the old `http://allsky.local/images`, which
+     would make every night's cloud unknown.
    - `phd2_log_dir` may be left empty: it defaults to PHD2's own
    `%USERPROFILE%\Documents\PHD2`. Set it if PHD2 writes its guide logs
    elsewhere; a directory that is not there costs the report its guiding
