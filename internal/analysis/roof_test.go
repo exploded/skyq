@@ -62,35 +62,18 @@ func TestRoofTimelineMidNightClose(t *testing.T) {
 		}
 	}
 
-	// The shut hours, the move itself and the settle window are dropped;
-	// everything else survives.
-	var samples []LumSample
-	for m := 0; m < 8*60; m += 10 {
-		samples = append(samples, LumSample{At: at(1, 0, 0).Add(time.Duration(m) * time.Minute), Luminance: 20})
-	}
-	got := tl.VisibleSamples(samples, DefaultRoofSettle)
-	for _, s := range got {
-		if !s.At.Before(at(1, 1, 20)) && s.At.Before(at(1, 5, 10)) {
-			t.Errorf("kept a roof-shut sample at %s", s.At.Format("15:04"))
-		}
-	}
-	if len(got) == 0 || len(got) == len(samples) {
-		t.Fatalf("filtered %d of %d samples; expected some but not all", len(samples)-len(got), len(samples))
-	}
 }
 
-// Unknown must behave exactly as it did before the gate existed: a night
-// with no roof lines keeps every sample. Blanking a night on a missing log
-// line would lose real sky.
-func TestRoofTimelineUnknownKeepsEverything(t *testing.T) {
+// A night with no roof lines is unknown throughout, never shut: it gets no
+// spans, so the report draws no roof bands over it.
+func TestRoofTimelineUnknownIsNotShut(t *testing.T) {
 	from, to := nightWindow()
 	tl := NewRoofTimeline(nil, from, to)
 	if got := tl.StateAt(at(3, 2, 0)); got != ninalog.RoofUnknown {
 		t.Errorf("got %s, want unknown", got)
 	}
-	samples := []LumSample{{At: at(3, 2, 0), Luminance: 25}, {At: at(3, 3, 0), Luminance: 30}}
-	if got := tl.VisibleSamples(samples, DefaultRoofSettle); len(got) != len(samples) {
-		t.Errorf("kept %d of %d samples; want all", len(got), len(samples))
+	if spans := tl.Spans(); len(spans) != 0 {
+		t.Errorf("spans = %+v, want none", spans)
 	}
 }
 
@@ -106,22 +89,5 @@ func TestRoofTimelineUnfinishedMove(t *testing.T) {
 	}
 	if got := tl.StateAt(at(2, 22, 0)); got != ninalog.RoofOpen {
 		t.Errorf("before the stall: got %s, want open", got)
-	}
-}
-
-// The settle window after an open covers the roof edge crossing the frame
-// and the lights still being on inside.
-func TestRoofTimelineSettleAfterOpen(t *testing.T) {
-	from, to := nightWindow()
-	tl := NewRoofTimeline([]ninalog.RoofMove{{
-		Start: at(2, 20, 16), End: at(2, 20, 17),
-		From: ninalog.RoofClosed, To: ninalog.RoofOpen,
-	}}, from, to)
-
-	if tl.SkyVisible(at(2, 20, 19), DefaultRoofSettle) {
-		t.Error("2 minutes after the open should still be settling")
-	}
-	if !tl.SkyVisible(at(2, 20, 30), DefaultRoofSettle) {
-		t.Error("13 minutes after the open should be sky")
 	}
 }

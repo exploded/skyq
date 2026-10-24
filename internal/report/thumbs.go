@@ -12,68 +12,92 @@ import (
 
 	"golang.org/x/image/draw"
 
-	"github.com/exploded/skyq/internal/allsky"
+	"github.com/exploded/skyq/internal/skycam"
 )
 
 const thumbWidth = 400
 
-// pickShots chooses the interesting all-sky moments — start of night, cloud
-// onset, the brightest (worst) frame, end of night — and embeds each as a
-// data: URI so the report stays a single file.
-func pickShots(in Input) []shot {
-	if len(in.Stills) == 0 {
+// Shot is one all-sky still the report shows, already in the local cache.
+type Shot struct {
+	At   time.Time
+	Note string
+	Path string
+}
+
+// ShotPick is a frame worth a thumbnail, and why.
+type ShotPick struct {
+	Frame skycam.Frame
+	Note  string
+}
+
+// PickShots chooses the interesting all-sky moments — start of the imaging
+// session, cloud onset, the cloudiest frame, end of session — from skycam's
+// frames in [from, to] that name a still. Fetching them is the caller's
+// job: skycam keeps stills for 14 nights, so any pick may come back 404 and
+// is then left out.
+func PickShots(frames []skycam.Frame, onset time.Time, hasOnset bool, from, to time.Time) []ShotPick {
+	var in []skycam.Frame
+	for _, f := range frames {
+		if f.Image != "" && !f.At.Before(from) && !f.At.After(to) {
+			in = append(in, f)
+		}
+	}
+	if len(in) == 0 {
 		return nil
 	}
-	type pick struct {
-		still allsky.Still
-		note  string
-	}
-	nearest := func(t time.Time) allsky.Still {
-		best := in.Stills[0]
+	nearest := func(t time.Time) skycam.Frame {
+		best := in[0]
 		bd := time.Duration(1<<62 - 1)
-		for _, s := range in.Stills {
-			d := s.At.Sub(t)
+		for _, f := range in {
+			d := f.At.Sub(t)
 			if d < 0 {
 				d = -d
 			}
 			if d < bd {
-				bd = d
-				best = s
+				bd, best = d, f
 			}
 		}
 		return best
 	}
 
-	var picks []pick
-	picks = append(picks, pick{in.Stills[0], "start of night"})
-	if in.HasOnset {
-		picks = append(picks, pick{nearest(in.Onset), "cloud onset"})
+	picks := []ShotPick{{in[0], "start of night"}}
+	if hasOnset {
+		picks = append(picks, ShotPick{nearest(onset), "cloud onset"})
 	}
-	if len(in.Samples) > 0 {
-		worst := in.Samples[0]
-		for _, s := range in.Samples {
-			if s.Luminance > worst.Luminance {
-				worst = s
-			}
+	var worst *skycam.Frame
+	for i, f := range in {
+		if f.Cloud != nil && (worst == nil || *f.Cloud > *worst.Cloud) {
+			worst = &in[i]
 		}
-		picks = append(picks, pick{nearest(worst.At), fmt.Sprintf("peak brightness %.1f", worst.Luminance)})
 	}
-	picks = append(picks, pick{in.Stills[len(in.Stills)-1], "end of night"})
+	if worst != nil && *worst.Cloud > 0 {
+		picks = append(picks, ShotPick{*worst, fmt.Sprintf("most cloud, %.0f%%", *worst.Cloud*100)})
+	}
+	picks = append(picks, ShotPick{in[len(in)-1], "end of night"})
 
 	seen := map[string]bool{}
-	var shots []shot
+	var out []ShotPick
 	for _, p := range picks {
-		if seen[p.still.Path] {
-			continue
+		if !seen[p.Frame.Image] {
+			seen[p.Frame.Image] = true
+			out = append(out, p)
 		}
-		seen[p.still.Path] = true
-		uri, err := thumbDataURI(p.still.Path)
+	}
+	return out
+}
+
+// shots embeds each still as a data: URI so the report stays a single
+// file. A still that will not decode is left out, never fatal.
+func shots(in []Shot) []shot {
+	var out []shot
+	for _, s := range in {
+		uri, err := thumbDataURI(s.Path)
 		if err != nil {
 			continue
 		}
-		shots = append(shots, shot{Time: p.still.At.Format("15:04"), Note: p.note, Src: template.URL(uri)})
+		out = append(out, shot{Time: s.At.Format("15:04"), Note: s.Note, Src: template.URL(uri)})
 	}
-	return shots
+	return out
 }
 
 func thumbDataURI(path string) (string, error) {

@@ -38,7 +38,7 @@ type EventMark struct {
 }
 
 // Band is a shaded time window: an autofocus run, or a stretch the roof was
-// shut over the all-sky camera.
+// not open over the all-sky camera.
 type Band struct{ M0, M1 float64 }
 
 // Divider is a dashed vertical rule at a target change, labelled with the
@@ -50,7 +50,7 @@ type Divider struct {
 
 // ChartOpts mirrors the reference builder's options object.
 type ChartOpts struct {
-	H          int     // viewBox height: 320 index, 210 luminance
+	H          int     // viewBox height: 320 index, 210 cloud, 224 guiding
 	YMax       float64 // values clamp here rather than escaping the plot
 	YTicks     int
 	GapMin     float64 // start a new subpath when a gap exceeds this
@@ -64,13 +64,13 @@ type ChartOpts struct {
 	TickStart  float64   // minutes offset of the first hour tick
 	TickLabel  func(m float64) string
 	Bands      []Band
-	RoofBands  []Band // hatched, labelled "roof shut"; luminance chart only
+	RoofBands  []Band // hatched, labelled "roof shut"; cloud chart only
 	Events     []EventMark
 	YFmt       func(v float64) string
 }
 
 const (
-	// roofHatchID is unique per page only because the luminance chart is the
+	// roofHatchID is unique per page only because the cloud chart is the
 	// one chart that carries roof bands (CHARTS.md draw order 1).
 	roofHatchID   = "roof-hatch"
 	roofLabelMinW = 64

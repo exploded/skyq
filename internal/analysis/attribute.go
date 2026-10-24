@@ -30,7 +30,13 @@ type AttributedEvent struct {
 // validated night this correctly reclassified the 00:17:12 error that
 // followed the 00:10:39 slew. Everything else after cloud onset is cloud;
 // the remainder is unexplained and worth a human's attention.
-func Attribute(events []ninalog.Event, slews []ninalog.Slew, targets []ninalog.TargetChange, onset time.Time, hasOnset bool) []AttributedEvent {
+//
+// cloudKnown reports whether the sky was being measured at a moment. A
+// failure after the onset but in a stretch with no cloud reading — the roof
+// shut, say — is not blamed on cloud: unknown is never cloudy. nil means
+// the sky was measured throughout, which is how nights carried over from
+// the luminance detector are treated.
+func Attribute(events []ninalog.Event, slews []ninalog.Slew, targets []ninalog.TargetChange, onset time.Time, hasOnset bool, cloudKnown func(time.Time) bool) []AttributedEvent {
 	var moves []time.Time
 	for _, s := range slews {
 		moves = append(moves, s.At)
@@ -41,12 +47,12 @@ func Attribute(events []ninalog.Event, slews []ninalog.Slew, targets []ninalog.T
 
 	out := make([]AttributedEvent, 0, len(events))
 	for _, e := range events {
-		out = append(out, AttributedEvent{Event: e, Cause: causeOf(e, moves, onset, hasOnset)})
+		out = append(out, AttributedEvent{Event: e, Cause: causeOf(e, moves, onset, hasOnset, cloudKnown)})
 	}
 	return out
 }
 
-func causeOf(e ninalog.Event, moves []time.Time, onset time.Time, hasOnset bool) Cause {
+func causeOf(e ninalog.Event, moves []time.Time, onset time.Time, hasOnset bool, cloudKnown func(time.Time) bool) Cause {
 	if e.Kind == ninalog.PHD2Error {
 		for _, m := range moves {
 			if !e.At.Before(m) && e.At.Sub(m) <= postSlewWindow {
@@ -54,7 +60,7 @@ func causeOf(e ninalog.Event, moves []time.Time, onset time.Time, hasOnset bool)
 			}
 		}
 	}
-	if hasOnset && !e.At.Before(onset) {
+	if hasOnset && !e.At.Before(onset) && (cloudKnown == nil || cloudKnown(e.At)) {
 		return CauseCloud
 	}
 	return CauseUnexplained

@@ -215,6 +215,8 @@ func summarise(page []byte) (string, []string) {
 		pills = append(pills, "Cloud "+om[1])
 	} else if strings.HasPrefix(text, "No cloud onset") {
 		pills = append(pills, "Clear all night")
+	} else if strings.HasPrefix(text, "Cloud unknown") {
+		pills = append(pills, "Cloud unknown")
 	}
 	return truncate(text, 180), pills
 }

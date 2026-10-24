@@ -68,7 +68,7 @@ func TestChooseBaselinesTargetAfterOnset(t *testing.T) {
 	prevBase := analysis.Baselines(res.Frames, prev, true)
 	if err := ingest(ctx, sdb, q, ingestInput{
 		night: "2026-09-02", logPath: "testdata/20260902.log", sha: "fixture",
-		res: res, onset: prev, hasOnset: true, baselines: prevBase, mode: "self", volWindow: 10,
+		res: res, onset: prev, hasOnset: true, baselines: prevBase, mode: "self", source: analysis.CloudSkycam,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestThinBaselinesStayOnTheirNight(t *testing.T) {
 	}
 	if err := ingest(ctx, sdb, q, ingestInput{
 		night: "2026-06-28", logPath: "fixture", sha: "fixture",
-		res: res, baselines: base, mode: "self", volWindow: 10,
+		res: res, baselines: base, mode: "self", source: analysis.CloudSkycam,
 	}); err != nil {
 		t.Fatal(err)
 	}

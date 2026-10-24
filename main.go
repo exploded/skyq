@@ -4,7 +4,6 @@
 //
 //	skyq report    [--night 2026-09-02]   analyse one night, write + publish the report
 //	skyq backfill  [--nights 30]          re-run report for recent nights with logs
-//	skyq calibrate [--night 2026-09-02]   suggest a volatility threshold from a clear night
 package main
 
 import (
@@ -62,10 +61,6 @@ func main() {
 			}
 		}
 		log.Printf("backfill complete: %d nights", ran)
-	case "calibrate":
-		if err := runCalibrate(cfg, loc, nightOf(*night, loc)); err != nil {
-			log.Fatal(err)
-		}
 	default:
 		usage()
 	}
@@ -81,6 +76,6 @@ func nightOf(flagVal string, loc *time.Location) string {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: skyq <report|backfill|calibrate> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: skyq <report|backfill> [flags]")
 	os.Exit(2)
 }

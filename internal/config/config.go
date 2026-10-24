@@ -1,5 +1,5 @@
 // Package config loads skyq's JSON config. The config file holds the
-// AllSky credentials, so it is gitignored; config.example.json ships in the
+// skycam credentials, so it is gitignored; config.example.json ships in the
 // repo instead. All behaviour changes go through this file plus the CLI —
 // there is no settings UI, by design.
 package config
@@ -7,7 +7,9 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -35,18 +37,21 @@ type Config struct {
 	// guiding card and nothing else.
 	PHD2LogDir string `json:"phd2_log_dir"`
 
-	AllSkyBaseURL  string `json:"allsky_base_url"` // http://allsky.local/images
+	// AllSkyBaseURL is the Pi's stills folder, http://allsky.local/images.
+	// skycam serves it in allsky's layout, and the report's thumbnails come
+	// from it. The credentials cover the sky API as well.
+	AllSkyBaseURL  string `json:"allsky_base_url"`
 	AllSkyUsername string `json:"allsky_username"`
 	AllSkyPassword string `json:"allsky_password"`
+
+	// SkycamURL is skycam's web server on the Pi, which serves the sky API
+	// (cloud, onset and roof per night) and /images/. Empty means the scheme
+	// and host of AllSkyBaseURL, which is where skycam runs.
+	SkycamURL string `json:"skycam_url"`
 
 	CacheDir   string `json:"cache_dir"`
 	DBPath     string `json:"db_path"`
 	ReportsDir string `json:"reports_dir"`
-
-	BandTop             float64 `json:"band_top"`
-	BandBottom          float64 `json:"band_bottom"`
-	VolatilityWindow    int     `json:"volatility_window"`
-	VolatilityThreshold float64 `json:"volatility_threshold"`
 
 	Publish Publish `json:"publish"`
 }
@@ -57,13 +62,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{
-		CacheDir:            "cache",
-		DBPath:              "skyq.db",
-		ReportsDir:          "reports",
-		BandTop:             0.06,
-		BandBottom:          0.30,
-		VolatilityWindow:    10,
-		VolatilityThreshold: 6.0,
+		CacheDir:   "cache",
+		DBPath:     "skyq.db",
+		ReportsDir: "reports",
 	}
 	if err := json.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
@@ -75,6 +76,19 @@ func Load(path string) (*Config, error) {
 		cfg.PHD2LogDir = os.ExpandEnv(`${USERPROFILE}\Documents\PHD2`)
 	}
 	return cfg, nil
+}
+
+// Skycam returns the skycam base URL: SkycamURL, or failing that the scheme
+// and host of AllSkyBaseURL. Empty when neither is set.
+func (c *Config) Skycam() string {
+	if c.SkycamURL != "" {
+		return strings.TrimRight(c.SkycamURL, "/")
+	}
+	u, err := url.Parse(c.AllSkyBaseURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // Location resolves the configured timezone.

@@ -16,7 +16,7 @@ These come from a design-system validator, not from taste. Breaking one produces
 is measurably harder to read.
 
 1. **One y-axis per chart. Never a dual-axis chart.** Two measures on different scales get two
-   stacked charts sharing an x-axis. The transparency index and the all-sky luminance are two
+   stacked charts sharing an x-axis. The transparency index and the all-sky cloud cover are two
    charts for exactly this reason.
 2. **Series colours are assigned in fixed slot order and never cycled.** H α = `--series-1`,
    O III = `--series-2`, S II = `--series-3`, L = `--series-4`, R = `--series-5`,
@@ -50,7 +50,7 @@ Every chart uses the same viewBox width and margins so their x-axes align visual
 stacked.
 
 ```
-viewBox   0 0 940 H          H = 320 (index), 210 (luminance), 224 (guiding)
+viewBox   0 0 940 H          H = 320 (index), 210 (cloud), 224 (guiding)
 left      L = 54             room for y-axis tick labels
 right     R = 62             room for direct series labels outside the plot
 top       T = 30             room for the axis label above the top gridline
@@ -80,11 +80,12 @@ letting a spike escape the plot.
 Back to front. Getting this wrong buries the data under the chrome.
 
 1. **Autofocus bands** — `<rect>` filled `var(--band)`, full plot height, one per AF window.
-   **Roof bands** (luminance chart only) follow: one `<rect>` per unbroken stretch the log
-   says the roof was shut or moving, filled with a 45° hatch — a `<pattern id="roof-hatch">`
+   **Roof bands** (cloud chart only) follow: one `<rect>` per unbroken stretch the roof was
+   not open — skycam's CLOSED, OPENING, CLOSING or ERROR from the roll-off controller, or, for
+   a night skycam cannot serve, shut or moving in N.I.N.A.'s log — filled with a 45° hatch — a `<pattern id="roof-hatch">`
    of `var(--roof)` strokes on `var(--band)`, 6px apart. The hatch is what separates it from
    an autofocus band, so it never relies on colour. Unknown roof state gets no band. The
-   pattern id is page-global, which is safe only while the luminance chart is the one chart
+   pattern id is page-global, which is safe only while the cloud chart is the one chart
    that draws roof bands.
 2. **Gridlines** — horizontal, `class="gl"`, at each y tick.
 3. **Y tick labels** — `class="tick"`, `text-anchor="end"`, at `x = L-9`, `y = Y(v)+4`.
@@ -96,7 +97,8 @@ Back to front. Getting this wrong buries the data under the chrome.
 7. **Reference rules** — `class="refline"` (dashed). The index chart has a horizontal rule at
    100 labelled *clear-sky baseline* (right-aligned, 6px above the rule) and a vertical rule
    at each target change labelled with the new target name (5px right of the rule, near the
-   top).
+   top). The cloud chart has a horizontal rule at 50 % labelled *onset level*: skycam's onset
+   is the first of three frames in a row at or above it.
    Each roof band at least 64px wide is labelled *roof shut* in `class="reftxt"`, 5px inside
    its left edge, near the top.
 8. **Series** — line first, then markers on top. `stroke-width: 2`, round joins and caps.
@@ -118,7 +120,9 @@ A line must break rather than draw a straight run across a period with no data. 
 
 - index chart: **75 minutes** (a filter can legitimately go that long between subs in an
   H/O/S rotation)
-- luminance chart: **6 minutes**
+- cloud chart: **6 minutes** (skycam shoots about every 20 seconds, so a longer break is a run
+  of frames with no cloud reading — roof not open, sun above −12°, or skycam still building its
+  baseline — and the line must break rather than draw them as clear)
 - guiding chart: **3 minutes** (anything longer is a slew, a dither settle or an autofocus
   run — PHD2 was not guiding, and the line must break rather than imply it was)
 

@@ -10,8 +10,9 @@ import (
 )
 
 // §9 of SPEC.md: baselines, index statistics and attribution from the
-// validated night. The onset time (03:48) is an input here — computing it
-// needs the all-sky stills, which are not part of this fixture.
+// validated night. The onset time (03:48) is a recorded input: it was
+// validated by hand from that night's all-sky stills, and skycam, which now
+// finds the onset, did not exist yet.
 
 var onset = time.Date(2026, 9, 3, 3, 48, 0, 0, time.UTC)
 
@@ -139,7 +140,7 @@ func TestIndexStats(t *testing.T) {
 
 func TestAttribution(t *testing.T) {
 	res := fixture(t)
-	attributed := Attribute(res.Events, res.Slews, res.TargetChanges, onset, true)
+	attributed := Attribute(res.Events, res.Slews, res.TargetChanges, onset, true, nil)
 	for _, e := range attributed {
 		if e.Kind != ninalog.PHD2Error {
 			continue
@@ -179,26 +180,30 @@ func TestUntrustworthyAF(t *testing.T) {
 	}
 }
 
-func TestDetectOnsetSynthetic(t *testing.T) {
-	// Flat luminance, then oscillation: onset fires when the trailing-window
-	// stddev crosses the threshold, not before.
-	start := time.Date(2026, 9, 3, 3, 0, 0, 0, time.UTC)
-	var samples []LumSample
-	for i := 0; i < 40; i++ {
-		lum := 28.0
-		if i >= 30 && i%2 == 0 {
-			lum = 55.0 // cloud: big swings
+// A failure after the onset, but where skycam had no cloud reading — the
+// roof shut, say — is not blamed on cloud. Unknown is never cloudy.
+func TestAttributionNeedsKnownCloud(t *testing.T) {
+	res := fixture(t)
+	gap0, gap1 := onset.Add(52*time.Minute), onset.Add(67*time.Minute) // 04:40–04:55
+	known := func(at time.Time) bool { return at.Before(gap0) || !at.Before(gap1) }
+	inGap := 0
+	for _, e := range Attribute(res.Events, res.Slews, res.TargetChanges, onset, true, known) {
+		if e.Kind != ninalog.SolveFailed && e.Kind != ninalog.PHD2Error {
+			continue
 		}
-		samples = append(samples, LumSample{At: start.Add(time.Duration(i) * time.Minute), Luminance: lum})
+		want := CauseCloud
+		switch {
+		case e.At.Format("15:04:05") == "00:17:12":
+			want = CausePostSlew
+		case !e.At.Before(gap0) && e.At.Before(gap1):
+			want = CauseUnexplained
+			inGap++
+		}
+		if e.Cause != want {
+			t.Errorf("%s at %s attributed %s, want %s", e.Kind, e.At.Format("15:04:05"), e.Cause, want)
+		}
 	}
-	if _, ok := DetectOnset(samples[:30], DefaultVolatilityWindow, DefaultVolatilityThreshold); ok {
-		t.Error("onset detected on flat series")
-	}
-	at, ok := DetectOnset(samples, DefaultVolatilityWindow, DefaultVolatilityThreshold)
-	if !ok {
-		t.Fatal("no onset detected on volatile series")
-	}
-	if at.Before(samples[30].At) {
-		t.Errorf("onset %s before volatility began %s", at, samples[30].At)
+	if inGap == 0 {
+		t.Fatal("no failure fell in the unknown stretch; move the gap")
 	}
 }

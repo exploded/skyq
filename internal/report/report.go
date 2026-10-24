@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/exploded/skyq/internal/allsky"
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/ninalog"
+	"github.com/exploded/skyq/internal/skycam"
 )
 
 //go:embed report.css
@@ -39,24 +39,30 @@ type Input struct {
 	Events        []analysis.AttributedEvent
 	AFRuns        []ninalog.AFRun
 	TargetChanges []ninalog.TargetChange
-	Samples       []analysis.LumSample
 	Onset         time.Time
 	HasOnset      bool
 	Baselines     map[analysis.BaselineKey]analysis.Baseline
 	BaselineMode  string // "self" | "historical"
-	Stills        []allsky.Still
 	Untrustworthy []ninalog.AFRun
 
-	// RoofNote explains any stretch missing from the luminance chart because
-	// the roof was shut over it. Empty when the log recorded no roof moves.
-	RoofNote string
-	// RoofSpans is the night's known roof history; shut and moving stretches
-	// are hatched on the luminance chart.
-	RoofSpans []analysis.RoofSpan
+	// CloudSource is where Onset came from: skycam, the retired luminance
+	// detector (a night carried over from before skycam), or unknown.
+	CloudSource analysis.CloudSource
+	// Sky is skycam's frames over the imaging session, for the cloud chart.
+	// Empty when skycam could not serve the night.
+	Sky []skycam.Frame
+	// Shots are the all-sky stills at the key moments, already fetched. A
+	// still skycam no longer keeps is simply not here.
+	Shots []Shot
 
-	Flats            []ninalog.FlatFrame
-	FlatExposures    []float64
-	FlatsUnstableSky bool // all-sky volatility crossed the threshold during flats
+	// RoofSpans is the night's known roof history; stretches the roof was
+	// not open are hatched on the cloud chart. RoofFromLog says they come
+	// from N.I.N.A.'s log, the fallback for a night skycam cannot serve.
+	RoofSpans   []analysis.RoofSpan
+	RoofFromLog bool
+
+	Flats         []ninalog.FlatFrame
+	FlatExposures []float64
 
 	// GuideBins is the night's PHD2 guiding, already reduced to per-minute
 	// RMS. Empty when PHD2 wrote no guide log for the night, or the log
@@ -153,7 +159,8 @@ type pageData struct {
 	Stats            []stat
 	Legend           []legendItem
 	IndexChart       template.HTML
-	LumChart         template.HTML
+	CloudChart       template.HTML
+	CloudNote        string
 	GuideChart       template.HTML
 	GuideLegend      []legendItem
 	HasGuide         bool
@@ -161,7 +168,6 @@ type pageData struct {
 	MultiTarget      bool
 	BaselineModeNote string
 	BaselineFallback string // set when some pair had no clear frames tonight
-	RoofNote         string // set when the roof gate left a gap in the chart
 	HasOnset         bool
 	OnsetHM          string
 	Shots            []shot
@@ -245,13 +251,23 @@ func Render(in Input) ([]byte, error) {
 	}
 	indexChart := RenderChart(series, opts)
 
-	var lumPts []Pt
-	for _, s := range in.Samples {
-		lumPts = append(lumPts, Pt{M: toMin(s.At), V: s.Luminance})
+	// skycam's cloud cover, one point per frame with a reading. Frames with
+	// none are left out rather than drawn at zero, so the line breaks over
+	// them: unknown is never clear.
+	var cloudPts []Pt
+	for _, f := range in.Sky {
+		if f.Cloud != nil {
+			cloudPts = append(cloudPts, Pt{M: toMin(f.At), V: *f.Cloud * 100})
+		}
 	}
-	lumSeries := []Series{{Name: "Sky brightness", Label: "all-sky", Color: "var(--series-3)", Pts: lumPts}}
-	lumChart := RenderChart(lumSeries, ChartOpts{
-		H: 210, YMax: lumYMax(lumPts), YTicks: 4, GapMin: 6, YLabel: "Mean sky luminance (0–255)",
+	var cloudSeries []Series
+	if len(cloudPts) > 0 {
+		cloudSeries = []Series{{Name: "Cloud cover", Label: "cloud", Color: "var(--series-3)", Pts: cloudPts}}
+	}
+	onsetLevel := cloudOnsetLevel
+	cloudChart := RenderChart(cloudSeries, ChartOpts{
+		H: 210, YMax: 100, YTicks: 4, GapMin: cloudGapMin, YLabel: "Cloud cover (%)",
+		Ref: &onsetLevel, RefLabel: "onset level",
 		SpanMin: span, TickStart: tickOff, TickLabel: tickLabel,
 		RoofBands: RoofBands(in.RoofSpans, origin, span),
 		YFmt:      func(v float64) string { return fmt.Sprintf("%.0f", v) },
@@ -267,7 +283,8 @@ func Render(in Input) ([]byte, error) {
 		Stats:            stats,
 		Legend:           legend,
 		IndexChart:       template.HTML(indexChart),
-		LumChart:         template.HTML(lumChart),
+		CloudChart:       template.HTML(cloudChart),
+		CloudNote:        cloudNote(in, len(cloudPts) > 0),
 		GuideChart:       template.HTML(guideChart),
 		GuideLegend:      seriesLegend(guideSeries),
 		HasGuide:         len(in.GuideBins) > 0,
@@ -276,19 +293,18 @@ func Render(in Input) ([]byte, error) {
 		BaselineModeNote: baselineNote(in.BaselineMode),
 		HasOnset:         in.HasOnset,
 		OnsetHM:          hm(in.Onset),
-		Shots:            pickShots(in),
+		Shots:            shots(in.Shots),
 		Baselines:        baselineRows(in.Baselines),
 		BaselineFallback: baselineFallbackNote(in.Baselines),
-		RoofNote:         in.RoofNote,
 		Events:           eventRows(in.Events),
 		EventNote:        eventNote,
 		Frames:           frameRows(in),
 		FlatCount:        len(in.Flats),
 		Foot: "Star counts come from Hocus Focus detection on each saved sub, tagged with the filter in place " +
 			"at exposure start and the target then being imaged. Frames inside completed autofocus runs are excluded. " +
-			"Still capture times come from the AllSky filenames. All times are local.",
+			"Cloud cover and roof state come from skycam on the observatory Pi. All times are local.",
 		CSS:        template.CSS(reportCSS),
-		ChartsJSON: chartsJSON(origin, span, series, lumSeries, guideSeries, guideYMax),
+		ChartsJSON: chartsJSON(origin, span, series, cloudSeries, guideSeries, guideYMax),
 		NavTop:     template.HTML(navBlock("top", in.NightOf, "", "")),
 		NavBottom:  template.HTML(navBlock("bottom", in.NightOf, "", "")),
 	}
@@ -300,7 +316,7 @@ func Render(in Input) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Guide-chart geometry. Taller than the luminance chart by the height of
+// Guide-chart geometry. Taller than the cloud chart by the height of
 // an event rail, so the plot area itself matches (CHARTS.md "The guide
 // chart"). RA and Dec take palette slots 1 and 2 — assigned to those two
 // axes for good, exactly as the filters own their slots on the index
@@ -430,8 +446,8 @@ func chartSpan(in Input) (time.Time, float64) {
 	for _, f := range in.Frames {
 		seen(f.At)
 	}
-	for _, s := range in.Samples {
-		seen(s.At)
+	for _, f := range in.Sky {
+		seen(f.At)
 	}
 	for _, e := range in.Events {
 		seen(e.At)
@@ -455,9 +471,9 @@ func chartSpan(in Input) (time.Time, float64) {
 }
 
 // RoofBands turns a night's roof history into chart bands: one per unbroken
-// stretch the log says the roof was shut or moving, clipped to the chart.
-// Unknown stretches get no band — a log that never mentions the roof is not
-// evidence it was shut (SPEC §4.4).
+// stretch the roof was shut or moving, clipped to the chart. Unknown
+// stretches get no band — a missing reading is not evidence the roof was
+// shut (SPEC §4.4).
 func RoofBands(spans []analysis.RoofSpan, origin time.Time, span float64) []Band {
 	var bands []Band
 	var from, to time.Time
@@ -487,18 +503,6 @@ func RoofBands(spans []analysis.RoofSpan, origin time.Time, span float64) []Band
 	}
 	flush()
 	return bands
-}
-
-func lumYMax(pts []Pt) float64 {
-	max := 0.0
-	for _, p := range pts {
-		if p.V > max {
-			max = p.V
-		}
-	}
-	// round up to a clean 20; luminance is 0–255 but a whole-range axis
-	// buries the clear-sky variation.
-	return math.Max(40, math.Ceil(max/20)*20)
 }
 
 // NightLabel renders a night as the report titles it — "10–11 September
@@ -562,7 +566,8 @@ func narrate(in Input) (string, []stat, string) {
 
 	var v strings.Builder
 	var stats []stat
-	if in.HasOnset {
+	switch {
+	case in.HasOnset:
 		fmt.Fprintf(&v, "Cloud arrived at %s — detected by the all-sky camera, independent of N.I.N.A. ", in.Onset.Format("15:04"))
 		fmt.Fprintf(&v, "Before it the sky ran at index %.0f (IQR %.0f–%.0f); after it %.0f (IQR %.0f–%.0f). ",
 			b.Median, b.Q1, b.Q3, a.Median, a.Q1, a.Q3)
@@ -580,12 +585,23 @@ func narrate(in Input) (string, []stat, string) {
 		stats = append(stats,
 			stat{K: "Index before " + in.Onset.Format("15:04"), V: fmt.Sprintf("%.0f", b.Median), Small: fmt.Sprintf("IQR %.0f–%.0f", b.Q1, b.Q3)},
 			stat{K: "Index after " + in.Onset.Format("15:04"), V: fmt.Sprintf("%.0f", a.Median), Small: fmt.Sprintf("IQR %.0f–%.0f", a.Q1, a.Q3)},
-			stat{K: "Cloud onset (all-sky)", V: in.Onset.Format("15:04"), Small: "independent"},
+			stat{K: "Cloud onset (all-sky)", V: in.Onset.Format("15:04"), Small: onsetSource(in.CloudSource)},
 			stat{K: "Errors after onset", V: fmt.Sprintf("%d of %d", afterOnset, failures), Small: "solve + PHD2"},
 		)
-	} else {
-		fmt.Fprintf(&v, "No cloud onset detected. The transparency index held at %.0f (IQR %.0f–%.0f) across %d light frames. ",
-			b.Median, b.Q1, b.Q3, light)
+	default:
+		if in.CloudSource == analysis.CloudUnknown {
+			// Unknown is never clear: say so first, so nobody reads a steady
+			// index as proof of a clear sky.
+			v.WriteString("Cloud unknown — skycam had no cloud reading for this night, so no failure is attributed to cloud. ")
+			fmt.Fprintf(&v, "The transparency index held at %.0f (IQR %.0f–%.0f) across %d light frames. ",
+				b.Median, b.Q1, b.Q3, light)
+			if causes[analysis.CauseUnexplained] > 0 {
+				fmt.Fprintf(&v, "%d of %d failures are unexplained. ", causes[analysis.CauseUnexplained], failures)
+			}
+		} else {
+			fmt.Fprintf(&v, "No cloud onset detected. The transparency index held at %.0f (IQR %.0f–%.0f) across %d light frames. ",
+				b.Median, b.Q1, b.Q3, light)
+		}
 		stats = append(stats,
 			stat{K: "Transparency index", V: fmt.Sprintf("%.0f", b.Median), Small: fmt.Sprintf("IQR %.0f–%.0f", b.Q1, b.Q3)},
 			stat{K: "Light frames", V: fmt.Sprintf("%d", light), Small: ""},
@@ -603,9 +619,7 @@ func narrate(in Input) (string, []stat, string) {
 	for _, r := range in.Untrustworthy {
 		fmt.Fprintf(&v, "The %s autofocus run fitted its curve on almost no stars and should not be trusted. ", r.Start.Format("15:04"))
 	}
-	if s := flatsSentence(in); s != "" {
-		v.WriteString(s)
-	}
+	v.WriteString(flatsSentence(in))
 
 	note := "All observatory events with their attributed causes."
 	if causes[analysis.CausePostSlew] == 1 && in.HasOnset {
@@ -669,10 +683,55 @@ func flatsSentence(in Input) string {
 		fmt.Fprintf(&s, ", auto-exposure %.1f–%.1f s", lo, hi)
 	}
 	s.WriteString(". ")
-	if in.FlatsUnstableSky {
-		s.WriteString("The all-sky camera saw unstable sky during the flats — check them for gradients before use. ")
-	}
 	return s.String()
+}
+
+// Cloud-chart geometry. Its y-axis is skycam's cloud cover as a percentage,
+// and the dashed rule marks skycam's onset level: three frames in a row at
+// or above it make the onset. skycam shoots about every 20 seconds, so a
+// break of more than cloudGapMin is a run of frames with no reading.
+const (
+	cloudOnsetLevel = 50.0
+	cloudGapMin     = 6
+)
+
+// cloudNote is the sentence under the cloud chart's heading. It says where
+// the numbers came from, and why the chart might be empty.
+func cloudNote(in Input, plotted bool) string {
+	var b strings.Builder
+	switch {
+	case plotted:
+		b.WriteString("skycam's cloud estimate for each all‑sky frame, from its star count against a clear‑sky baseline — " +
+			"independent of anything N.I.N.A. recorded. Gaps are frames with no reading: the roof not open, the sun above −12°, " +
+			"or skycam still building its baseline.")
+	case in.CloudSource == analysis.CloudLuminance:
+		b.WriteString("No skycam data for this night: it predates skycam. ")
+		if in.HasOnset {
+			fmt.Fprintf(&b, "The %s onset was found by skyq's retired luminance detector and is carried forward unchanged.", in.Onset.Format("15:04"))
+		} else {
+			b.WriteString("skyq's retired luminance detector found no onset, and that verdict is carried forward unchanged.")
+		}
+	case len(in.Sky) > 0:
+		b.WriteString("skycam has frames for this night but no cloud reading during the imaging session, so cloud is unknown.")
+	default:
+		b.WriteString("skycam could not serve this night, so cloud is unknown and nothing is attributed to it.")
+	}
+	if len(in.RoofSpans) > 0 {
+		if in.RoofFromLog {
+			b.WriteString(" Hatched stretches are where N.I.N.A.'s log says the roof was shut or moving; it records only the moves N.I.N.A. made.")
+		} else {
+			b.WriteString(" Hatched stretches are where the roof controller reported the roof not open.")
+		}
+	}
+	return b.String()
+}
+
+// onsetSource is the stat row's caption on the onset.
+func onsetSource(src analysis.CloudSource) string {
+	if src == analysis.CloudLuminance {
+		return "luminance, carried forward"
+	}
+	return "skycam"
 }
 
 func baselineNote(mode string) string {
@@ -782,7 +841,7 @@ type seriesJSON struct {
 	Pts   []Pt   `json:"pts"`
 }
 
-func chartsJSON(origin time.Time, span float64, index, lum, guide []Series, guideYMax float64) template.JS {
+func chartsJSON(origin time.Time, span float64, index, cloud, guide []Series, guideYMax float64) template.JS {
 	o := float64(origin.Hour()*60 + origin.Minute())
 	mk := func(ss []Series) []seriesJSON {
 		out := make([]seriesJSON, 0, len(ss))
@@ -791,15 +850,9 @@ func chartsJSON(origin time.Time, span float64, index, lum, guide []Series, guid
 		}
 		return out
 	}
-	lumYM := 40.0
-	for _, s := range lum {
-		for _, p := range s.Pts {
-			lumYM = math.Max(lumYM, math.Ceil(p.V/20)*20)
-		}
-	}
 	charts := []chartJSON{
 		{Svg: "c1", Box: "b1", Tip: "t1", H: 320, Rail: true, YMax: 200, Span: span, Origin: o, Fmt: "pct", Series: mk(index)},
-		{Svg: "c2", Box: "b2", Tip: "t2", H: 210, Rail: false, YMax: lumYM, Span: span, Origin: o, Fmt: "lum", Series: mk(lum)},
+		{Svg: "c2", Box: "b2", Tip: "t2", H: 210, Rail: false, YMax: 100, Span: span, Origin: o, Fmt: "pct", Series: mk(cloud)},
 	}
 	if len(guide) > 0 {
 		charts = append(charts, chartJSON{Svg: "c3", Box: "b3", Tip: "t3", H: guideChartH, Rail: true,

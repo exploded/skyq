@@ -2,16 +2,15 @@ package report
 
 import (
 	"os"
-	"regexp"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/exploded/skyq/internal/allsky"
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/ninalog"
 	"github.com/exploded/skyq/internal/phd2"
+	"github.com/exploded/skyq/internal/skycam"
 )
 
 // The embedded stylesheet must stay byte-identical to the design source of
@@ -38,7 +37,7 @@ func TestRenderFixtureNight(t *testing.T) {
 	}
 	onset := time.Date(2026, 9, 3, 3, 48, 0, 0, time.UTC)
 	base := analysis.Baselines(res.Frames, onset, true)
-	events := analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, true)
+	events := analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, true, nil)
 	var untrust []ninalog.AFRun
 	for _, r := range res.AFRuns {
 		if analysis.UntrustworthyAF(r, res.Frames) {
@@ -46,15 +45,12 @@ func TestRenderFixtureNight(t *testing.T) {
 		}
 	}
 
-	// Real luminance data: the validated reference report embeds the series
-	// measured from the night's all-sky video. Chart origin was 20:45 local.
-	samples := referenceLumSeries(t)
-
-	var stills []allsky.Still
-	if st, err := allsky.ScanDir("../../testdata/stills", time.UTC); err == nil {
-		for _, s := range st {
-			stills = append(stills, s)
-		}
+	// The hand-built sky fixture: skycam did not exist that night.
+	sky := skyFixture(t)
+	from, to := res.Frames[0].At, res.Frames[len(res.Frames)-1].At.Add(30*time.Minute)
+	shots := fixtureShots(sky, onset, from, to)
+	if len(shots) == 0 {
+		t.Fatal("no thumbnails from the fixture")
 	}
 
 	html, err := Render(Input{
@@ -63,16 +59,17 @@ func TestRenderFixtureNight(t *testing.T) {
 		Events:        events,
 		AFRuns:        res.AFRuns,
 		TargetChanges: res.TargetChanges,
-		Samples:       samples,
 		Onset:         onset,
 		HasOnset:      true,
+		CloudSource:   analysis.CloudSkycam,
+		Sky:           sky.Frames,
+		Shots:         shots,
 		Baselines:     base,
 		BaselineMode:  "self",
-		Stills:        stills,
 		Untrustworthy: untrust,
 		Flats:         res.Flats,
 		FlatExposures: res.FlatExposures,
-		RoofSpans:     analysis.NewRoofTimeline(res.RoofMoves, time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)).Spans(),
+		RoofSpans:     sky.RoofSpans(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +79,8 @@ func TestRenderFixtureNight(t *testing.T) {
 	for _, want := range []string{
 		"Morning sky flats: 60 frames (H 20, O 20, S 20)",
 		`viewBox="0 0 940 320"`, // index chart
-		`viewBox="0 0 940 210"`, // luminance chart
+		`viewBox="0 0 940 210"`, // cloud chart
+		"All&#8209;sky cloud cover", "onset level", "most cloud, 97%",
 		"clear-sky baseline",
 		"03:48",
 		"NGC 2070",
@@ -102,7 +100,7 @@ func TestRenderFixtureNight(t *testing.T) {
 	if got := strings.Count(page, `fill="var(--band)"`); got != 14 {
 		t.Errorf("autofocus bands = %d, want 14", got)
 	}
-	// The roof was open all night; the 06:36 close is after the chart ends.
+	// skycam saw the roof open all night.
 	if strings.Contains(page, "url(#roof-hatch)") {
 		t.Error("roof band drawn on a night the roof was open throughout")
 	}
@@ -178,39 +176,106 @@ func TestRenderBaselineFallbackNote(t *testing.T) {
 	}
 }
 
-var reLumData = regexp.MustCompile(`"lum":\[((?:\[[\d.,-]+\],?)+)\]`)
-
-func referenceLumSeries(t *testing.T) []analysis.LumSample {
+func skyFixture(t *testing.T) *skycam.Night {
 	t.Helper()
-	raw, err := os.ReadFile("../../design/reference-report.html")
+	f, err := os.Open("../../testdata/sky-20260902.json")
 	if err != nil {
-		t.Skipf("no reference report: %v", err)
+		t.Fatal(err)
 	}
-	m := reLumData.FindSubmatch(raw)
-	if m == nil {
-		t.Fatal("no lum series in reference report")
+	defer f.Close()
+	n, err := skycam.Decode(f, time.UTC)
+	if err != nil {
+		t.Fatal(err)
 	}
-	origin := time.Date(2026, 9, 2, 20, 45, 0, 0, time.UTC)
-	var samples []analysis.LumSample
-	for _, pair := range strings.Split(strings.Trim(string(m[1]), "[]"), "],[") {
-		parts := strings.Split(pair, ",")
-		if len(parts) != 2 {
-			continue
+	return n
+}
+
+// fixtureShots stands in for the fetch: the picks whose still is in
+// testdata/stills are found, the rest are gone, as past skycam's 14 nights.
+func fixtureShots(sky *skycam.Night, onset time.Time, from, to time.Time) []Shot {
+	var out []Shot
+	for _, p := range PickShots(sky.Frames, onset, true, from, to) {
+		path := filepath.Join("../../testdata/stills", filepath.Base(p.Frame.Image))
+		if _, err := os.Stat(path); err == nil {
+			out = append(out, Shot{At: p.Frame.At, Note: p.Note, Path: path})
 		}
-		mm, err1 := strconv.ParseFloat(parts[0], 64)
-		v, err2 := strconv.ParseFloat(parts[1], 64)
-		if err1 != nil || err2 != nil {
-			continue
+	}
+	return out
+}
+
+func TestPickShots(t *testing.T) {
+	sky := skyFixture(t)
+	from := time.Date(2026, 9, 2, 20, 48, 0, 0, time.UTC)
+	to := time.Date(2026, 9, 3, 6, 0, 0, 0, time.UTC)
+	onset := time.Date(2026, 9, 3, 3, 48, 0, 0, time.UTC)
+	got := map[string]string{}
+	for _, p := range PickShots(sky.Frames, onset, true, from, to) {
+		got[p.Note] = p.Frame.At.Format("15:04:05")
+	}
+	want := map[string]string{
+		"start of night": "20:48:00", "cloud onset": "03:48:00",
+		"most cloud, 97%": "05:19:12", "end of night": "06:00:00",
+	}
+	for note, at := range want {
+		if got[note] != at {
+			t.Errorf("%s = %q, want %s (all picks %v)", note, got[note], at, got)
 		}
-		samples = append(samples, analysis.LumSample{
-			At:        origin.Add(time.Duration(mm * float64(time.Minute))),
-			Luminance: v,
-		})
 	}
-	if len(samples) < 100 {
-		t.Fatalf("only %d luminance samples parsed from reference", len(samples))
+	if p := PickShots(sky.Frames, onset, true, to.Add(time.Hour), to.Add(2*time.Hour)); p != nil {
+		t.Errorf("picks outside every frame: %v", p)
 	}
-	return samples
+}
+
+// A night skycam could not serve must say cloud is unknown, never imply a
+// clear sky, and draw no cloud line.
+func TestRenderCloudUnknown(t *testing.T) {
+	at := time.Date(2026, 10, 1, 22, 0, 0, 0, time.UTC)
+	html, err := Render(Input{
+		NightOf:      "2026-10-01",
+		Frames:       []ninalog.Frame{{At: at, ExposureSec: 300, Filter: "H", Target: "IC 4628", DetectedStars: 330}},
+		Baselines:    map[analysis.BaselineKey]analysis.Baseline{{Target: "IC 4628", Filter: "H"}: {MedianStars: 332, NFrames: 8}},
+		BaselineMode: "self",
+		CloudSource:  analysis.CloudUnknown,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, want := range []string{"Cloud unknown — skycam had no cloud reading", "skycam could not serve this night"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("report missing %q", want)
+		}
+	}
+	for _, bad := range []string{"No cloud onset detected", "Cloud arrived", "Clear all night"} {
+		if strings.Contains(page, bad) {
+			t.Errorf("unknown-cloud report says %q", bad)
+		}
+	}
+	if _, pills := summarise(html); len(pills) != 2 || pills[1] != "Cloud unknown" {
+		t.Errorf("index pills = %v, want [Index 99 Cloud unknown]", pills)
+	}
+}
+
+// A night from before skycam keeps its luminance onset, and says so.
+func TestRenderLuminanceCarriedForward(t *testing.T) {
+	at := time.Date(2026, 8, 31, 22, 0, 0, 0, time.UTC)
+	html, err := Render(Input{
+		NightOf:      "2026-08-31",
+		Frames:       []ninalog.Frame{{At: at, ExposureSec: 300, Filter: "H", Target: "IC 4628", DetectedStars: 330}},
+		Baselines:    map[analysis.BaselineKey]analysis.Baseline{{Target: "IC 4628", Filter: "H"}: {MedianStars: 332, NFrames: 8}},
+		BaselineMode: "self",
+		Onset:        at.Add(3 * time.Hour), HasOnset: true,
+		CloudSource: analysis.CloudLuminance,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, want := range []string{"Cloud arrived at 01:00", "retired luminance detector", "luminance, carried forward"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("report missing %q", want)
+		}
+	}
 }
 
 // An LRGB night must plot every filter: the slots are fixed per filter
@@ -383,12 +448,13 @@ func TestPreviewGuidingNight(t *testing.T) {
 	html, err := Render(Input{
 		NightOf:       "2026-09-02",
 		Frames:        res.Frames,
-		Events:        analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, true),
+		Events:        analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, true, nil),
 		AFRuns:        res.AFRuns,
 		TargetChanges: res.TargetChanges,
-		Samples:       referenceLumSeries(t),
+		Sky:           skyFixture(t).Frames,
 		Onset:         onset,
 		HasOnset:      true,
+		CloudSource:   analysis.CloudSkycam,
 		Baselines:     analysis.Baselines(res.Frames, onset, true),
 		BaselineMode:  "self",
 		Flats:         res.Flats,

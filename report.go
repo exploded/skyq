@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/exploded/skyq/internal/allsky"
 	"github.com/exploded/skyq/internal/analysis"
 	"github.com/exploded/skyq/internal/config"
 	"github.com/exploded/skyq/internal/ninalog"
 	"github.com/exploded/skyq/internal/phd2"
 	"github.com/exploded/skyq/internal/publish"
 	"github.com/exploded/skyq/internal/report"
+	"github.com/exploded/skyq/internal/skycam"
 	"github.com/exploded/skyq/internal/store"
 	db "github.com/exploded/skyq/internal/store/db"
 )
@@ -54,53 +54,33 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 	}
 	log.Printf("night %s: %d logs, %d frames, %d events", night, len(logs), len(res.Frames), len(res.Events))
 
-	// All-sky stills: sync from allsky.local (best effort — the analysis
-	// still runs on the log alone if the box is unreachable), then measure.
-	// Sampling is clamped to the imaging session: AllSky records from dusk,
-	// and the twilight luminance ramp reads as volatility, firing a false
-	// cloud onset before the first frame (seen on real data: "onset" 20:37).
-	sampleStart, sampleEnd := res.Frames[0].At, res.Frames[len(res.Frames)-1].At.Add(30*time.Minute)
+	// The imaging session, which skycam's cloud has to cover for the
+	// night's cloud to count as known. Dawn flats can run past the last light
+	// frame; the chart covers them too.
+	sessionStart, sessionEnd := res.Frames[0].At, res.Frames[len(res.Frames)-1].At.Add(30*time.Minute)
 	if n := len(res.Flats); n > 0 {
-		// Dawn flats can run past the last light frame; cover them so the
-		// unstable-sky check below has data.
-		if end := res.Flats[n-1].At.Add(10 * time.Minute); end.After(sampleEnd) {
-			sampleEnd = end
+		if end := res.Flats[n-1].At.Add(10 * time.Minute); end.After(sessionEnd) {
+			sessionEnd = end
 		}
 	}
-	samples, stills := skySamples(cfg, loc, night, sampleStart, sampleEnd)
 
-	// The all-sky camera is inside the observatory: with the roof shut it
-	// measures the roof, near-constant and dark. Those stills must not reach
-	// the volatility window, or a dawn close reads as a cloud onset and a
-	// mid-night close reads as the clearest hours of the night. The log only
-	// records roof moves N.I.N.A. commanded, so nights it says nothing about
-	// are analysed exactly as before (SPEC §4.4).
-	roof := analysis.NewRoofTimeline(res.RoofMoves, windowStart, windowEnd)
-	roofNote := ""
-	if shut := len(samples) - len(roof.VisibleSamples(samples, analysis.DefaultRoofSettle)); shut > 0 {
-		log.Printf("roof shut or moving for %d of %d stills — excluded from cloud detection", shut, len(samples))
-		roofNote = roofShutNote(roof, sampleStart, sampleEnd, shut)
-		samples = roof.VisibleSamples(samples, analysis.DefaultRoofSettle)
-	}
-	onset, hasOnset := analysis.DetectOnset(samples, cfg.VolatilityWindow, cfg.VolatilityThreshold)
-	if hasOnset {
-		log.Printf("cloud onset %s (volatility > %.1f)", onset.Format("15:04"), cfg.VolatilityThreshold)
-	}
-
-	// Dawn cloud during sky flats puts gradients in them — worth a warning
-	// while the frames are still easy to retake.
-	flatsUnstable := false
-	if len(res.Flats) > 0 {
-		vol := analysis.VolatilitySeries(samples, cfg.VolatilityWindow)
-		f0, f1 := res.Flats[0].At, res.Flats[len(res.Flats)-1].At
-		for i, s := range samples {
-			if !s.At.Before(f0) && !s.At.After(f1) && vol[i] > cfg.VolatilityThreshold {
-				flatsUnstable = true
-				break
+	// Cloud comes from skycam on the Pi. A night it cannot serve, or one
+	// with no cloud reading across the session, has unknown cloud: no
+	// onset, nothing attributed to cloud. Unknown is never clear (SPEC §8).
+	client := skycamClient(cfg)
+	sky := skyNight(client, loc, night)
+	cloud := cloudVerdict{Source: analysis.CloudUnknown}
+	var skyFrames []skycam.Frame
+	if sky != nil {
+		for _, f := range sky.Frames {
+			if !f.At.Before(sessionStart) && !f.At.After(sessionEnd) {
+				skyFrames = append(skyFrames, f)
 			}
 		}
-		if flatsUnstable {
-			log.Printf("WARNING: unstable sky during flats (%s–%s)", f0.Format("15:04"), f1.Format("15:04"))
+		if sky.CloudKnown(sessionStart, sessionEnd) {
+			cloud = cloudVerdict{Onset: sky.Onset, HasOnset: sky.HasOnset, Source: analysis.CloudSkycam, KnownAt: sky.CloudKnownAt}
+		} else {
+			log.Printf("skycam has %d frames for %s but no cloud reading during the session — cloud unknown", len(sky.Frames), night)
 		}
 	}
 
@@ -112,10 +92,46 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 	q := db.New(sdb)
 	ctx := context.Background()
 
+	// A night already on record keeps its cloud verdict when skycam has
+	// nothing for it now: every night before skycam (its onset came from the
+	// retired luminance detector), or one rerun while the Pi is down. A rerun
+	// must never quietly turn a known onset into unknown. The per-frame
+	// readings are not stored, so a carried-forward onset covers the whole
+	// night after it.
+	if cloud.Source == analysis.CloudUnknown {
+		if prev, err := q.GetNight(ctx, night); err == nil && analysis.CloudSource(prev.CloudSource) != analysis.CloudUnknown {
+			cloud = cloudVerdict{Source: analysis.CloudSource(prev.CloudSource)}
+			if prev.CloudOnsetAt.Valid {
+				if t, err := time.Parse(time.RFC3339, prev.CloudOnsetAt.String); err == nil {
+					cloud.Onset, cloud.HasOnset = t.In(loc), true
+				}
+			}
+			log.Printf("no skycam cloud for %s; keeping the stored %s verdict", night, cloud.Source)
+		}
+	}
+	switch {
+	case cloud.HasOnset:
+		log.Printf("cloud onset %s (%s)", cloud.Onset.Format("15:04"), cloud.Source)
+	case cloud.Source == analysis.CloudUnknown:
+		log.Printf("cloud unknown for %s — nothing will be attributed to cloud", night)
+	}
+	onset, hasOnset := cloud.Onset, cloud.HasOnset
+
+	// Roof bands for the chart: skycam's roof comes from the roll-off
+	// controller and sees every move. N.I.N.A.'s log only records the moves
+	// N.I.N.A. made, so it is the fallback for a night skycam cannot serve.
+	var roofSpans []analysis.RoofSpan
+	roofFromLog := sky == nil
+	if sky != nil {
+		roofSpans = sky.RoofSpans()
+	} else {
+		roofSpans = analysis.NewRoofTimeline(res.RoofMoves, windowStart, windowEnd).Spans()
+	}
+
 	baselines, mode := chooseBaselines(ctx, q, res.Frames, onset, hasOnset, night)
 	log.Printf("baseline mode: %s (%d pairs)", mode, len(baselines))
 
-	events := analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, hasOnset)
+	events := analysis.Attribute(res.Events, res.Slews, res.TargetChanges, onset, hasOnset, cloud.KnownAt)
 	var untrust []ninalog.AFRun
 	for _, r := range res.AFRuns {
 		if analysis.UntrustworthyAF(r, res.Frames) {
@@ -125,9 +141,9 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 
 	if err := ingest(ctx, sdb, q, ingestInput{
 		night: night, logPath: strings.Join(logs, ";"), sha: sha,
-		res: res, events: events, samples: samples,
-		onset: onset, hasOnset: hasOnset, baselines: baselines, mode: mode,
-		volWindow: cfg.VolatilityWindow,
+		res: res, events: events,
+		onset: onset, hasOnset: hasOnset, source: cloud.Source,
+		baselines: baselines, mode: mode,
 	}); err != nil {
 		return fmt.Errorf("ingest: %w", err)
 	}
@@ -142,14 +158,14 @@ func runReport(cfg *config.Config, loc *time.Location, night string) error {
 		log.Printf("PHD2: %d guide frames, %d sessions, RMS %.2f arcsec", guideSummary.All.N, guideSummary.Sessions, guideSummary.All.Total)
 	}
 
+	shots := fetchShots(client, report.PickShots(skyFrames, onset, hasOnset, sessionStart, sessionEnd))
 	html, err := report.Render(report.Input{
 		NightOf: night, Frames: res.Frames, Events: events, AFRuns: res.AFRuns,
-		TargetChanges: res.TargetChanges, Samples: samples,
-		Onset: onset, HasOnset: hasOnset,
+		TargetChanges: res.TargetChanges, Untrustworthy: untrust,
+		Onset: onset, HasOnset: hasOnset, CloudSource: cloud.Source,
+		Sky: skyFrames, Shots: shots, RoofSpans: roofSpans, RoofFromLog: roofFromLog,
 		Baselines: baselines, BaselineMode: mode,
-		Stills: stills, Untrustworthy: untrust,
-		Flats: res.Flats, FlatExposures: res.FlatExposures, FlatsUnstableSky: flatsUnstable,
-		RoofNote: roofNote, RoofSpans: roof.Spans(),
+		Flats: res.Flats, FlatExposures: res.FlatExposures,
 		GuideBins: guideBins, Guide: guideSummary,
 	})
 	if err != nil {
@@ -212,49 +228,75 @@ func guideNight(dir string, loc *time.Location, start, end time.Time) *phd2.Resu
 	return res.Clip(start, end)
 }
 
-// skySamples syncs the night's stills into the cache and measures them.
-func skySamples(cfg *config.Config, loc *time.Location, night string, start, end time.Time) ([]analysis.LumSample, []allsky.Still) {
-	dateDir := strings.ReplaceAll(night, "-", "")
-	if cfg.AllSkyBaseURL != "" {
-		f := &allsky.Fetcher{
-			BaseURL: cfg.AllSkyBaseURL, Username: cfg.AllSkyUsername,
-			Password: cfg.AllSkyPassword, CacheDir: cfg.CacheDir,
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-		fetched, err := f.Sync(ctx, dateDir)
-		if len(fetched) > 0 {
-			log.Printf("fetched %d new stills", len(fetched))
-		}
-		if err != nil {
-			log.Printf("stills sync from %s incomplete (continuing with what's cached): %v", cfg.AllSkyBaseURL, err)
-		}
+// cloudVerdict is the night's cloud as attribution and the report use it.
+// KnownAt is nil when the per-frame readings are not to hand (a verdict
+// carried forward from the database), which Attribute reads as measured
+// throughout.
+type cloudVerdict struct {
+	Onset    time.Time
+	HasOnset bool
+	Source   analysis.CloudSource
+	KnownAt  func(time.Time) bool
+}
+
+// skycamClient is nil when no skycam URL is configured, which leaves every
+// night's cloud unknown.
+func skycamClient(cfg *config.Config) *skycam.Client {
+	u := cfg.Skycam()
+	if u == "" {
+		return nil
 	}
-	all, err := allsky.ScanDir(filepath.Join(cfg.CacheDir, dateDir), loc)
-	if err != nil {
-		log.Printf("no stills cache for %s: %v", night, err)
-		return nil, nil
+	return &skycam.Client{
+		BaseURL: u, Username: cfg.AllSkyUsername, Password: cfg.AllSkyPassword,
+		CacheDir: cfg.CacheDir,
 	}
-	var samples []analysis.LumSample
-	var stills []allsky.Still
-	for _, s := range all {
-		if s.At.Before(start) || !s.At.Before(end) {
+}
+
+// skyNight reads one night from skycam's sky API. Every failure is a log
+// line and a nil night, never an error: the report runs on the N.I.N.A. log
+// alone, with cloud unknown.
+func skyNight(c *skycam.Client, loc *time.Location, night string) *skycam.Night {
+	if c == nil {
+		log.Printf("no skycam_url or allsky_base_url configured — cloud unknown")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	n, err := c.Night(ctx, strings.ReplaceAll(night, "-", ""), loc)
+	switch {
+	case errors.Is(err, skycam.ErrNotFound):
+		log.Printf("skycam has no frames for %s", night)
+		return nil
+	case err != nil:
+		log.Printf("skycam sky API unavailable (continuing with cloud unknown): %v", err)
+		return nil
+	}
+	log.Printf("skycam: %d frames for %s", len(n.Frames), night)
+	return n
+}
+
+// fetchShots fetches the thumbnails' stills into the cache. skycam keeps
+// stills for 14 nights, so a 404 is routine: that thumbnail is left out.
+func fetchShots(c *skycam.Client, picks []report.ShotPick) []report.Shot {
+	if c == nil || len(picks) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var out []report.Shot
+	for _, p := range picks {
+		path, err := c.Still(ctx, p.Frame.Image)
+		switch {
+		case errors.Is(err, skycam.ErrNotFound):
+			log.Printf("still %s is gone from skycam — no %s thumbnail", p.Frame.Image, p.Note)
+			continue
+		case err != nil:
+			log.Printf("still %s: %v — no %s thumbnail", p.Frame.Image, err, p.Note)
 			continue
 		}
-		fh, err := os.Open(s.Path)
-		if err != nil {
-			continue
-		}
-		lum, err := allsky.Luminance(fh, cfg.BandTop, cfg.BandBottom)
-		fh.Close()
-		if err != nil {
-			log.Printf("luminance %s: %v", filepath.Base(s.Path), err)
-			continue
-		}
-		samples = append(samples, analysis.LumSample{At: s.At, Luminance: lum})
-		stills = append(stills, s)
+		out = append(out, report.Shot{At: p.Frame.At, Note: p.Note, Path: path})
 	}
-	return samples, stills
+	return out
 }
 
 // chooseBaselines uses the rolling historical median once a pair has enough
@@ -341,12 +383,11 @@ type ingestInput struct {
 	night, logPath, sha string
 	res                 *ninalog.Result
 	events              []analysis.AttributedEvent
-	samples             []analysis.LumSample
 	onset               time.Time
 	hasOnset            bool
+	source              analysis.CloudSource
 	baselines           map[analysis.BaselineKey]analysis.Baseline
 	mode                string
-	volWindow           int
 }
 
 // ingest writes the night atomically. Re-running on an unchanged log is a
@@ -358,11 +399,11 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 		onsetStr = sql.NullString{String: in.onset.UTC().Format(time.RFC3339), Valid: true}
 	}
 	if existing, err := q.GetNight(ctx, in.night); err == nil {
-		// No-op only when both the log AND the all-sky conclusion are
-		// unchanged — stills keep arriving after early re-runs, and a
-		// changed onset changes every downstream number.
-		if existing.LogSha256 == in.sha && existing.CloudOnsetAt == onsetStr {
-			log.Printf("night %s already ingested (log and onset unchanged)", in.night)
+		// No-op only when both the log AND the cloud verdict are unchanged —
+		// skycam can answer later than an early run, and a changed onset
+		// changes every downstream number.
+		if existing.LogSha256 == in.sha && existing.CloudOnsetAt == onsetStr && existing.CloudSource == string(in.source) {
+			log.Printf("night %s already ingested (log and cloud unchanged)", in.night)
 			return nil
 		}
 		log.Printf("night %s changed — replacing", in.night)
@@ -380,7 +421,7 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 	}
 	if err := qtx.CreateNight(ctx, db.CreateNightParams{
 		NightOf: in.night, LogPath: in.logPath, LogSha256: in.sha,
-		CloudOnsetAt: onsetStr, CloudSource: "luminance", BaselineMode: in.mode,
+		CloudOnsetAt: onsetStr, CloudSource: string(in.source), BaselineMode: in.mode,
 		IngestedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		return err
@@ -414,6 +455,11 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 			return err
 		}
 	}
+	if in.source == analysis.CloudUnknown {
+		// Nothing says these frames saw clear sky, so they are not a
+		// clear-sky reference for another night.
+		return tx.Commit()
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, b := range in.baselines {
 		if b.Source == analysis.SourceWholeNight {
@@ -430,58 +476,4 @@ func ingest(ctx context.Context, sdb *sql.DB, q *db.Queries, in ingestInput) err
 		}
 	}
 	return tx.Commit()
-}
-
-func isNaN(f float64) bool { return f != f }
-
-func runCalibrate(cfg *config.Config, loc *time.Location, night string) error {
-	nightStart, err := time.ParseInLocation("2006-01-02", night, loc)
-	if err != nil {
-		return fmt.Errorf("bad night %q: %w", night, err)
-	}
-	start := nightStart.Add(12 * time.Hour)
-	samples, _ := skySamples(cfg, loc, night, start, start.Add(24*time.Hour))
-	if len(samples) < cfg.VolatilityWindow*2 {
-		return fmt.Errorf("only %d samples for %s — need a full night of stills", len(samples), night)
-	}
-	vol := analysis.VolatilitySeries(samples, cfg.VolatilityWindow)
-	var vals []float64
-	for _, v := range vol {
-		if !isNaN(v) {
-			vals = append(vals, v)
-		}
-	}
-	sort.Float64s(vals)
-	max := vals[len(vals)-1]
-	p99 := vals[len(vals)*99/100]
-	fmt.Printf("night %s: %d samples\n", night, len(samples))
-	fmt.Printf("volatility max %.2f, p99 %.2f (current threshold %.2f)\n", max, p99, cfg.VolatilityThreshold)
-	fmt.Printf("suggested threshold for a KNOWN CLEAR night: %.1f (max × 1.5)\n", max*1.5)
-	fmt.Println("only calibrate against a night you know was clear end to end.")
-	return nil
-}
-
-// roofShutNote describes the gaps the roof gate leaves in the luminance
-// chart. Without it a reader sees a hole in the night and assumes the
-// camera failed.
-func roofShutNote(roof analysis.RoofTimeline, from, to time.Time, excluded int) string {
-	var spans []string
-	for _, sp := range roof.Spans() {
-		if sp.State != ninalog.RoofClosed || !sp.To.After(from) || !sp.From.Before(to) {
-			continue
-		}
-		start, end := sp.From, sp.To
-		if start.Before(from) {
-			start = from
-		}
-		if end.After(to) {
-			end = to
-		}
-		spans = append(spans, fmt.Sprintf("%s–%s", start.Format("15:04"), end.Format("15:04")))
-	}
-	if len(spans) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("Roof shut %s. The all-sky camera is inside the observatory, so those %d stills measured the roof, not the sky, and are left out of this chart and the cloud detection.",
-		strings.Join(spans, ", "), excluded)
 }
