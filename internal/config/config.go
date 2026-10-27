@@ -37,19 +37,29 @@ type Config struct {
 	// guiding card and nothing else.
 	PHD2LogDir string `json:"phd2_log_dir"`
 
-	// AllSkyBaseURL is skycam's web server on the Pi, http://allsky.local.
+	// SkycamURL is skycam's web server on the Pi, http://skycam.local.
 	// It serves the sky API (cloud, onset and roof per night) and the
 	// stills under /images/, both behind these Basic auth credentials.
 	// Empty leaves every night's cloud unknown.
-	AllSkyBaseURL  string `json:"allsky_base_url"`
-	AllSkyUsername string `json:"allsky_username"`
-	AllSkyPassword string `json:"allsky_password"`
+	SkycamURL      string `json:"skycam_url"`
+	SkycamUsername string `json:"skycam_username"`
+	SkycamPassword string `json:"skycam_password"`
 
 	CacheDir   string `json:"cache_dir"`
 	DBPath     string `json:"db_path"`
 	ReportsDir string `json:"reports_dir"`
 
 	Publish Publish `json:"publish"`
+}
+
+// legacyKeys are the skycam settings' names from before the Pi was renamed
+// from allsky to skycam (2026-10-27). They are still read, so a config.json
+// on the NUC keeps working until it is updated; the new keys win if both are
+// set.
+type legacyKeys struct {
+	BaseURL  string `json:"allsky_base_url"`
+	Username string `json:"allsky_username"`
+	Password string `json:"allsky_password"`
 }
 
 func Load(path string) (*Config, error) {
@@ -65,30 +75,43 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	var old legacyKeys
+	if err := json.Unmarshal(raw, &old); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if cfg.SkycamURL == "" {
+		cfg.SkycamURL = old.BaseURL
+	}
+	if cfg.SkycamUsername == "" {
+		cfg.SkycamUsername = old.Username
+	}
+	if cfg.SkycamPassword == "" {
+		cfg.SkycamPassword = old.Password
+	}
 	if cfg.NINALogDir == "" {
 		cfg.NINALogDir = os.ExpandEnv(`${LOCALAPPDATA}\NINA\Logs`)
 	}
 	if cfg.PHD2LogDir == "" {
 		cfg.PHD2LogDir = os.ExpandEnv(`${USERPROFILE}\Documents\PHD2`)
 	}
-	if err := cfg.checkAllSkyURL(); err != nil {
+	if err := cfg.checkSkycamURL(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
 
-// checkAllSkyURL rejects an allsky_base_url with a path. The old value,
+// checkSkycamURL rejects a skycam_url with a path. The pre-skycam value,
 // http://allsky.local/images, would send every sky API request to a path
 // that 404s, and a 404 reads as cloud unknown, so the mistake would show
 // only as a run of nights with no cloud.
-func (c *Config) checkAllSkyURL() error {
-	c.AllSkyBaseURL = strings.TrimRight(c.AllSkyBaseURL, "/")
-	if c.AllSkyBaseURL == "" {
+func (c *Config) checkSkycamURL() error {
+	c.SkycamURL = strings.TrimRight(c.SkycamURL, "/")
+	if c.SkycamURL == "" {
 		return nil
 	}
-	u, err := url.Parse(c.AllSkyBaseURL)
+	u, err := url.Parse(c.SkycamURL)
 	if err != nil || u.Host == "" || u.Path != "" {
-		return fmt.Errorf("allsky_base_url %q must be the Pi's address alone, e.g. http://allsky.local", c.AllSkyBaseURL)
+		return fmt.Errorf("skycam_url %q must be the Pi's address alone, e.g. http://skycam.local", c.SkycamURL)
 	}
 	return nil
 }

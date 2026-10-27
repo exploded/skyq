@@ -17,7 +17,7 @@ quartile conventions without re-reading §9.
 
 Runs on the Windows 11 NUC (`nuc.local`) next to N.I.N.A. Reads the
 N.I.N.A. and PHD2 logs locally, reads cloud, onset and roof from skycam's sky
-API on `allsky.local` (basic auth), fetches only the report's thumbnail
+API on `skycam.local` (basic auth), fetches only the report's thumbnail
 stills, and publishes finished reports to the Linode (deepspaceplace.com) by
 scp. Task Scheduler runs `skyq report` daily at 09:00. No settings UI —
 config.json (gitignored, secrets) + CLI only.

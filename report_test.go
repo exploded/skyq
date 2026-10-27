@@ -19,7 +19,7 @@ import (
 	db "github.com/exploded/skyq/internal/store/db"
 )
 
-// fakePi stands in for skycam on allsky.local: the hand-built sky fixture
+// fakePi stands in for skycam on skycam.local: the hand-built sky fixture
 // for 2026-09-02 and the real stills in testdata/stills, behind basic auth.
 // Every other still 404s, as one past skycam's 14-night retention does.
 // While down is set, every request 404s, as for a night skycam never saw.
@@ -66,8 +66,8 @@ func testConfig(t *testing.T, skycamURL string) *config.Config {
 		t.Fatal(err)
 	}
 	return &config.Config{
-		NINALogDir: logs, AllSkyBaseURL: skycamURL,
-		AllSkyUsername: "skyq", AllSkyPassword: "secret",
+		NINALogDir: logs, SkycamURL: skycamURL,
+		SkycamUsername: "skyq", SkycamPassword: "secret",
 		CacheDir: filepath.Join(dir, "cache"), DBPath: filepath.Join(dir, "skyq.db"),
 		ReportsDir: filepath.Join(dir, "reports"),
 	}

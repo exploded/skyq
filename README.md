@@ -6,7 +6,7 @@ against a clear-sky baseline), attributes failures to their causes, charts
 the night's PHD2 guiding, and writes a self-contained HTML morning report.
 
 The sky itself belongs to [skycam](https://github.com/exploded/skycam), which
-runs on the observatory Pi at allsky.local. skyq reads each night's cloud
+runs on the observatory Pi at skycam.local. skyq reads each night's cloud
 cover, cloud onset and roof state from skycam's sky API, and pulls the
 report's thumbnails from its `/images/` folder.
 
@@ -16,7 +16,7 @@ See `SPEC.md` for the full design and the validated acceptance numbers.
 
 | Machine | Program | Owns |
 |---|---|---|
-| Pi (allsky.local) | skycam | The sky: capture, cloud, onset, roof state, the live view, and the Alpaca weather device N.I.N.A. reads |
+| Pi (skycam.local) | skycam | The sky: capture, cloud, onset, roof state, the live view, and the Alpaca weather device N.I.N.A. reads |
 | NUC | skyq | Imaging: what got through, the transparency index, failure attribution, autofocus and guiding |
 | Linode | deepspaceplace.com | The published reports |
 
@@ -38,11 +38,14 @@ those nights again, for example after a change to the report.
 1. Build: `go build` (the main package lives at the repo root)
 2. `copy config.example.json config.json` and fill in the paths
    (`config.json` is gitignored — never commit it).
-   - `allsky_username` and `allsky_password` are skycam's `images_user` and
+   - `skycam_username` and `skycam_password` are skycam's `images_user` and
      `images_password`. The same Basic auth covers `/images/` and the sky API.
-   - `allsky_base_url` is skycam's address alone, `http://allsky.local`.
-     skyq refuses to start with the old `http://allsky.local/images`, which
-     would make every night's cloud unknown.
+   - `skycam_url` is skycam's address alone, `http://skycam.local`.
+     skyq refuses to start with a path such as `http://skycam.local/images`,
+     which would make every night's cloud unknown.
+   - Configs from before the Pi was renamed (2026-10-27) use
+     `allsky_base_url`, `allsky_username` and `allsky_password`. skyq still
+     reads them, but the `skycam_*` keys win if both are set.
    - `phd2_log_dir` may be left empty: it defaults to PHD2's own
    `%USERPROFILE%\Documents\PHD2`. Set it if PHD2 writes its guide logs
    elsewhere; a directory that is not there costs the report its guiding
@@ -65,7 +68,7 @@ those nights again, for example after a change to the report.
 ## Cloud and roof from skycam
 
 Each `report` run asks skycam for the night:
-`GET http://allsky.local/api/nights/<YYYYMMDD>/sky`. The reply gives each
+`GET http://skycam.local/api/nights/<YYYYMMDD>/sky`. The reply gives each
 frame's cloud cover and roof state, plus the cloud onset. skyq uses the onset
 as given, so the onset rule lives in skycam alone.
 
@@ -91,7 +94,7 @@ as given, so the onset rule lives in skycam alone.
 ### N.I.N.A.'s weather device
 
 N.I.N.A. already reads skycam's Alpaca ObservingConditions device at
-allsky.local:11111. Its `SkyQuality` is skycam's approximate sky brightness
+skycam.local:11111. Its `SkyQuality` is skycam's approximate sky brightness
 in mag/arcsec², not skyq's transparency index. skyq no longer runs a
 weather device or a live page.
 

@@ -19,7 +19,7 @@ night's cloud from skycam, write an HTML report, and store everything in SQLite 
 improve over time.
 
 **The sky belongs to skycam** (`exploded/skycam`), the all-sky camera software on the
-observatory Pi at `allsky.local`. Since 2026-10-24 it measures cloud from each frame's star
+observatory Pi at `skycam.local`. Since 2026-10-24 it measures cloud from each frame's star
 count, knows the roof state from the roll-off controller, finds the cloud onset, serves the
 live view, and runs the ASCOM Alpaca ObservingConditions device N.I.N.A. reads. skyq's
 former Phase 2 — a live monitor with its own Alpaca device — moved there and is gone from
@@ -35,7 +35,7 @@ this repo (§7).
 | **Language** | Go |
 | **Storage** | SQLite via modernc/sqlite (pure Go, no cgo), queries via [sqlc](https://sqlc.dev/) |
 | **Web** | `html/template` + HTMX (self-hosted, no CDN) |
-| **Sky data** | skycam on `allsky.local` (the observatory Pi): `GET /api/nights/<YYYYMMDD>/sky` for cloud, onset and roof per frame, and `/images/YYYYMMDD/image-YYYYMMDDHHMMSS.jpg` for stills, both behind the same HTTP Basic auth (§4.4) |
+| **Sky data** | skycam on `skycam.local` (the observatory Pi): `GET /api/nights/<YYYYMMDD>/sky` for cloud, onset and roof per frame, and `/images/YYYYMMDD/image-YYYYMMDDHHMMSS.jpg` for stills, both behind the same HTTP Basic auth (§4.4) |
 | **N.I.N.A. log** | Local file, `%LOCALAPPDATA%\NINA\Logs\` — open read-only |
 | **Service mgmt** | Windows Task Scheduler: daily task at 09:00 for `skyq report` |
 | **Publishing** | Finished reports pushed to the Linode, served at deepspaceplace.com (already behind Caddy) |
@@ -45,7 +45,7 @@ in the prototype disappears.
 
 **Getting the sky to the NUC.** skyq asks skycam for one night at a time over the LAN. The
 night date is allsky's: frames before noon belong to the previous evening, the same
-convention as skyq's night-of. `http://allsky.local/images/` and the sky API are (and should
+convention as skyq's night-of. `http://skycam.local/images/` and the sky API are (and should
 stay) password protected — the client sends HTTP Basic auth on every request, with the
 credentials in skyq's config file, never in the repo. skyq fetches only the stills the
 report shows as thumbnails, into a local cache on the NUC. skycam keeps frame rows for 365
@@ -515,7 +515,7 @@ skyq's former Phase 2 (`skyq serve`: a stills poller, a darkness gate, a live HT
 Alpaca ObservingConditions device on `:11112`, sharing discovery port 32227 with
 alpaca-switch) was removed on 2026-10-24. skycam on the Pi does all of it now:
 
-- Its Alpaca ObservingConditions device is on `allsky.local:11111`, and N.I.N.A. already
+- Its Alpaca ObservingConditions device is on `skycam.local:11111`, and N.I.N.A. already
   reads it. `CloudCover` comes from skycam's star counts, and `SkyQuality` is approximate sky
   brightness in mag/arcsec², not skyq's transparency index. skycam also passes
   OpenWeatherMap's ambient readings through.

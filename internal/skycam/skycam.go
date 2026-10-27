@@ -1,5 +1,5 @@
 // Package skycam reads the night sky from skycam, the all-sky camera
-// software on the observatory Pi (allsky.local). skycam owns everything
+// software on the observatory Pi (skycam.local). skycam owns everything
 // about the sky: it measures cloud from each frame's star count, knows the
 // roof state from the roll-off controller, and works out the cloud onset.
 // skyq only reads its answers, through GET /api/nights/<YYYYMMDD>/sky, and
@@ -145,7 +145,7 @@ func (n *Night) RoofSpans() []analysis.RoofSpan {
 // Client talks to skycam. The sky API and /images/ share one set of HTTP
 // Basic credentials, which come from config, never from the repo.
 type Client struct {
-	BaseURL  string // e.g. http://allsky.local
+	BaseURL  string // e.g. http://skycam.local
 	Username string
 	Password string
 	// CacheDir keeps fetched stills as <CacheDir>/<YYYYMMDD>/<file>, the
